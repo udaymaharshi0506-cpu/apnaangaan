@@ -1,0 +1,356 @@
+================================================================================
+            AANGAN REAL ESTATE MARKETPLACE - END-TO-END PROJECT AUDIT
+                       Comprehensive Technical Analysis Report
+================================================================================
+Generated Date: September 28, 2026
+Target Environment: Next.js 16.2.6 | React 19.2.6 | TypeScript 5.9.3 | Node.js 22+
+Project Name: nextjs-postgresql-template ("Aangan" Real Estate Marketplace)
+Author: Antigravity Code Intelligence
+Report Format: Plain Text (.txt)
+================================================================================
+
+TABLE OF CONTENTS:
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY & OVERALL SYSTEM HEALTH
+2. PACKAGE DEPENDENCIES & 2026 ECOSYSTEM COMPATIBILITY AUDIT
+3. BUILD, COMPILATION & TYPECHECK ANALYSIS
+4. LINTING & STATIC CODE ANALYSIS (37 PROBLEMS: 19 ERRORS, 18 WARNINGS)
+5. TEST SUITE EXECUTION & INTEGRATION TEST BREAKDOWN
+6. CRITICAL SECURITY, PRIVACY & AUTHENTICATION VULNERABILITIES
+7. RUNTIME BUGS, BROKEN COMPONENTS & EDGE CASE FAILURES
+8. DATABASE SCHEMA, DRIZZLE ORM & DATA INTEGRITY DEFECTS
+9. ARCHITECTURAL PATTERNS & PERFORMANCE CONSIDERATIONS
+10. STEP-BY-STEP REMEDIATION & IMPLEMENTATION ROADMAP
+================================================================================
+
+
+1. EXECUTIVE SUMMARY & OVERALL SYSTEM HEALTH
+--------------------------------------------------------------------------------
+The project is a privacy-first real estate marketplace application branded as "Aangan", built using Next.js 16 (App Router with Turbopack), React 19, TypeScript 5.9, Drizzle ORM 0.45 with node-postgres (pg), and Tailwind CSS v4.
+
+Core Value Proposition:
+- Facilitates buying, renting, PG/co-living, and commercial space discovery.
+- Protects personal data (PII) by never revealing owner and seeker phone numbers/emails directly to each other.
+- All inquiries and meeting proposals are intermediated through an internal administration portal.
+
+Current Status Assessment:
+- TypeScript Compilation (typecheck): PASS (0 errors)
+- Production Build (next build): PASS (Compiles with Turbopack)
+- ESLint (eslint .): FAILED (19 ERRORS, 18 WARNINGS)
+- Unit Tests (privacy.test.ts): PASS (5/5 tests passing)
+- Integration Tests (privacy.integration.test.ts): FAILED (ECONNREFUSED / 500 error)
+- System Health Score: 68 / 100 (Functionally rich, but suffering from React 19 effect violations, brittle auth secret fallbacks, broken automated integration tests, and edge-case runtime crashes).
+
+
+================================================================================
+2. PACKAGE DEPENDENCIES & 2026 ECOSYSTEM COMPATIBILITY AUDIT
+================================================================================
+Dependencies installed in package.json:
+
+Runtime Dependencies:
+  - next: "16.2.6"
+    * Status: Modern 2026 release. Employs Turbopack by default. Uses Promise-based request APIs (`cookies()`, `params`). Handled properly in app routes and layout.
+  - react: "19.2.6" & react-dom: "19.2.6"
+    * Status: React 19 introduces strict rules against synchronous setState within useEffect bodies (`react-hooks/set-state-in-effect`), which triggers 12 lint errors across provider and client components.
+  - zod: "^4.6.5"
+    * Status: Modern Zod v4. Top-level functions like `z.email()` are supported. Note: Downgrading to Zod 3 in other environments would break `z.email()`.
+  - drizzle-orm: "0.45.2" & drizzle-kit: "0.31.10"
+    * Status: Latest Drizzle ORM generation. Note: `drizzle.config.json` is legacy format; Drizzle Kit 0.31+ prefers `drizzle.config.ts`.
+  - jose: "^6.2.12"
+    * Status: Up-to-date JWT signing and verification library. Properly implements `SignJWT` and `jwtVerify`.
+  - bcryptjs: "^3.0.3"
+    * Status: Compatible, pure JS implementation of bcrypt.
+  - pg: "8.20.0" & @types/pg: "8.18.0"
+    * Status: Standard PostgreSQL connection pool driver.
+  - tailwindcss: "4.1.17" & @tailwindcss/postcss: "4.1.17"
+    * Status: Tailwind CSS v4 utilizes the new CSS-first `@theme` configuration model without legacy `tailwind.config.js`.
+  - lucide-react: "^1.47.0"
+    * Status: Current icon library.
+
+Missing Standard Scripts in package.json:
+- No "test" script is defined! Running tests requires manual execution of `npx tsx --test`.
+- No "db:push", "db:migrate", or "db:studio" scripts are exposed for Drizzle operations.
+
+
+================================================================================
+3. BUILD, COMPILATION & TYPECHECK ANALYSIS
+================================================================================
+Command: `npm run typecheck` (`tsc --noEmit`)
+Result:
+  Exit Code: 0
+  Errors: 0
+  Diagnostics: TypeScript types across all 28 files in `src/` and `tests/` align with strict type configurations.
+
+Command: `npm run build` (`next build`)
+Result:
+  Exit Code: 0
+  Output:
+    ▲ Next.js 16.2.6 (Turbopack)
+    ✓ Compiled successfully in 2.3s
+    ✓ Finished TypeScript in 3.5s
+    ✓ Generating static pages using 9 workers (3/3)
+    Routes generated:
+      - / (Dynamic)
+      - /[section] (Dynamic)
+      - /admin (Dynamic)
+      - /admin/login (Dynamic)
+      - /api/[...segments] (Dynamic)
+      - /api/health (Dynamic)
+      - /property/[id] (Dynamic)
+      - /manifest.webmanifest (Static)
+      - /_not-found (Static)
+
+
+================================================================================
+4. LINTING & STATIC CODE ANALYSIS (37 PROBLEMS: 19 ERRORS, 18 WARNINGS)
+================================================================================
+Command: `npm run lint` (`eslint .`)
+Result:
+  Exit Code: 1
+  Total Issues: 37 problems (19 errors, 18 warnings)
+
+CATEGORY A: React 19 Cascading Render Errors (`react-hooks/set-state-in-effect`)
+In React 19 and eslint-plugin-react-hooks, calling `setState` synchronously within the body of a `useEffect` is prohibited because it triggers cascading renders and performance regressions.
+
+1. `src/components/providers.tsx`:
+   - Line 68: `useEffect(() => { void refreshUser(); }, [refreshUser]);`
+     Inside `refreshUser()`, `setUser(...)` and `setLoading(false)` are called synchronously or unconditionally on mount.
+   - Line 72: `if (stored === "dark") { setTheme("dark"); ... }`
+     Direct synchronous `setTheme` inside `useEffect` on mount.
+   - Line 90: `useEffect(() => { void refreshFavorites(); }, [refreshFavorites]);`
+     Direct synchronous `setSavedIds` inside `useEffect`.
+
+2. `src/components/search-experience.tsx`:
+   - Line 26: `useEffect(() => { setDraft(initialFilters); setQuery(initialFilters.q || initialFilters.city || ""); }, [initialFilters]);`
+     Synchronously synchronizing state to props. (React recommended pattern: derive state during rendering or use a key prop to reset form state).
+
+3. `src/components/home-sections.tsx`:
+   - Line 35: `setRecent(ids.map(...))` inside `useEffect([properties])`.
+     Causes cascading renders whenever properties prop changes.
+
+4. `src/components/member-experiences.tsx`:
+   - Line 40: `SavedExperience` calling `setItems` / `setFetching` in `useEffect`.
+   - Line 52: `InquiriesExperience` calling `setItems` / `setFetching` in `useEffect`.
+   - Line 75: `OwnerExperience` calling `setListings` / `setInterests` in `useEffect`.
+   - Line 101: `NotificationsExperience` calling `setItems` in `useEffect`.
+   - Line 117: `ProfileExperience` calling `setName`, `setEmail`, `setSearches` in `useEffect`.
+
+5. `src/components/post-property.tsx`:
+   - Line 45: Calling `setForm` synchronously from `localStorage` within `useEffect`.
+
+6. `src/components/admin-experience.tsx`:
+   - Line 48: Calling `setStatus` and `setNotes` inside `useEffect([lead])` on prop change.
+   - Line 96: Calling `setStats`, `setLeads`, `setModeration` inside `useEffect([statusFilter])`.
+
+CATEGORY B: Unescaped Entities (`react/no-unescaped-entities`)
+Unescaped apostrophes (') in JSX cause parsing anomalies and violate JSX best practices:
+1. `src/components/admin-experience.tsx:74` -> "never each other's identity" (escape as `other&apos;s` or `other&#39;s`)
+2. `src/components/auth-experiences.tsx:81` -> "I'M HERE TO..." and "Let's get started"
+3. `src/components/member-experiences.tsx:56` -> "Both parties' contact details remain private"
+4. `src/components/member-experiences.tsx:85` -> "everyone's privacy protected"
+5. `src/components/member-experiences.tsx:88` -> "anyone's personal details"
+6. `src/components/post-property.tsx:85` -> "Let's get your space listed."
+
+CATEGORY C: Next.js Image Optimization Warnings (`@next/next/no-img-element`)
+18 instances across all major components use raw HTML `<img>` tags instead of `<Image />` from `next/image`.
+Impact: Higher bandwidth usage, lack of modern AVIF/WebP responsive sizing, and potential Cumulative Layout Shift (CLS) on slow networks.
+
+
+================================================================================
+5. TEST SUITE EXECUTION & INTEGRATION TEST BREAKDOWN
+================================================================================
+
+1. Unit Test Suite (`tests/privacy.test.ts`):
+   - Command: `npx tsx --test tests/privacy.test.ts`
+   - Result: 5 PASSED, 0 FAILED (Duration: 115ms)
+   - Verified Scenarios:
+     ✔ `serializePublicProperty`: Strips owner identity, contact details, and password hash.
+     ✔ `serializeCustomerLead`: Does not leak owner contact details, internal admin notes, or history.
+     ✔ `serializeOwnerLead`: Ensures customer contact details and ID remain anonymous.
+     ✔ `serializePublicMeeting`: Returns only meeting mode, scheduled time, and status.
+     ✔ `serializeAdminLead`: Confirms admin serializer correctly retains both parties' contact details for coordination.
+
+2. Integration Test Suite (`tests/privacy.integration.test.ts`):
+   - Command: `npx tsx --env-file=.env --test tests/privacy.integration.test.ts`
+   - Result: FAILED (AssertionError: 500 !== 200)
+   - Root Cause:
+     Error: `connect ECONNREFUSED 127.0.0.1:5432`
+     The test attempts to invoke actual Next.js route handlers (`dispatch`) which initiate database queries to PostgreSQL via `src/lib/seed.ts` and `src/db/index.ts`.
+     Because no PostgreSQL service is running or provisioned during automated test runs, the route handler returns HTTP 500 ("Something went wrong. Please try again.").
+   - Architectural Defect:
+     There is no test isolation or database mocking mechanism (e.g. `@electric-sql/pglite`, in-memory SQLite, or Testcontainers). Running automated CI/CD tests fails out of the box unless a PostgreSQL instance is pre-configured and seeded.
+
+
+================================================================================
+6. CRITICAL SECURITY, PRIVACY & AUTHENTICATION VULNERABILITIES
+================================================================================
+
+Vulnerability 1: Weak JWT Secret Fallback (High Severity)
+- Location: `src/lib/auth.ts:15`
+- Code:
+  `const secret = new TextEncoder().encode(process.env.AUTH_SECRET || createHash("sha256").update(process.env.DATABASE_URL || "local-preview-session").digest("hex"));`
+- Risk: If `AUTH_SECRET` is not provided in environment variables, the system derives the signature key from `DATABASE_URL` or the static string `"local-preview-session"`. Anyone who knows or guesses the database connection string or default fallback can forge valid JWT access tokens for ANY user ID, including administrators.
+- Fix: Throw an explicit fatal error at application startup if `AUTH_SECRET` is missing in production.
+
+Vulnerability 2: Production Bypass via Demo Mode Detection (High Severity)
+- Location: `src/lib/seed.ts:13` and `src/lib/api-handler.ts:105, 121, 134, 159`
+- Code:
+  `export const demoMode = () => (process.env.DEMO_MODE === "true" || (process.env.DEMO_MODE !== "false" && /(?:127\.0\.0\.1|localhost)/.test(process.env.DATABASE_URL || ""))) && !process.env.TWILIO_VERIFY_SERVICE_SID;`
+- Risk: If a staging or production container connects to a local database proxy (e.g., Cloud SQL Proxy, pgbouncer, or container network on 127.0.0.1) and Twilio SID is omitted, `demoMode()` automatically evaluates to `true`.
+  When demoMode is active:
+  1. Phone OTP verification accepts the static code `"123456"`.
+  2. Admin Two-Factor Authentication (2FA) accepts `"000000"` (`src/lib/auth.ts:134`).
+  3. Anyone can sign in as administrator by entering the demo credentials and "000000".
+- Fix: Enforce `DEMO_MODE=true` explicitly; never infer demo privileges from connection string hostnames.
+
+Vulnerability 3: Local Ephemeral Storage for Image Uploads (Medium-High Severity)
+- Location: `src/lib/api-handler.ts:358-362`
+- Code:
+  `const folder = path.join(process.cwd(), "public", "uploads");`
+  `await writeFile(path.join(folder, filename), bytes);`
+- Risk: In modern cloud deployments (Vercel, AWS Fargate, Google Cloud Run, Kubernetes), the local filesystem is ephemeral and read-only.
+  1. Uploaded property photos will be wiped upon instance restart or deployment.
+  2. Requests routed across different server instances will receive HTTP 404 for uploaded files.
+  3. No magic-number inspection is performed on uploaded image files (only file extension and client-supplied MIME type), allowing malicious arbitrary file uploads.
+- Fix: Use S3 / Cloudinary / R2 object storage with binary signature verification.
+
+Vulnerability 4: Buffer Length Crash in `timingSafeEqual` (Medium Severity)
+- Location: `src/lib/auth.ts:145`
+- Code:
+  `if (timingSafeEqual(expected, Buffer.from(code))) return true;`
+- Risk: Node.js `crypto.timingSafeEqual(a, b)` requires that `a.length === b.length`. If an input reaches this check where `code` has a different byte length than `expected` (6 bytes), Node.js throws an unhandled `RangeError: Input buffers must have the same length`, crashing the request handler and resulting in an unexpected 500 error instead of a clean 401.
+
+Vulnerability 5: Incomplete Cascade Deletion Constraints (Medium Severity)
+- Location: `src/db/schema.ts:68, 94, 104`
+- Detail:
+  `scheduledByAdminId: uuid("scheduled_by_admin_id").notNull().references(() => users.id)`
+  `adminId: uuid("admin_id").notNull().references(() => users.id)`
+  Unlike customer and owner foreign keys which have `{ onDelete: "cascade" }`, admin references lack cascade rules or `onDelete: "set null"`. If an admin user is deleted, PostgreSQL blocks the operation or aborts with a foreign key constraint violation.
+
+
+================================================================================
+7. RUNTIME BUGS, BROKEN COMPONENTS & EDGE CASE FAILURES
+================================================================================
+
+Bug 1: Empty Photo Gallery Causes NaN Crash in PropertyDetail
+- Location: `src/components/property-detail.tsx:57, 67`
+- Code:
+  `const photos = property.images.length ? property.images : [];`
+  `{[1,2].map((index) => <button onClick={() => setPhotoIndex(index % photos.length)} ...>`
+  `onClick={() => setPhotoIndex((photoIndex - 1 + photos.length) % photos.length)}`
+- Failure: If a property has no images (`property.images = []`), `photos.length` is 0.
+  - `index % 0` produces `NaN`.
+  - Clicking gallery arrows or thumbnails sets `photoIndex` to `NaN`.
+  - `photos[NaN]` evaluates to `undefined`, breaking image rendering and throwing errors in React.
+- Fix: Guard with `if (!photos.length)` and provide a fallback placeholder image.
+
+Bug 2: Invalid UUID Route Parameter Throws Unhandled 500 Database Error
+- Location: `src/app/property/[id]/page.tsx:10, 16`
+- Code:
+  `if (!/^[a-f0-9-]{36}$/i.test(id)) notFound();`
+- Failure: The regular expression `/^[a-f0-9-]{36}$/i` matches any 36 characters of hex and hyphens (for example, `"------------------------------------"` or `"123456789012345678901234567890123456"`).
+  When this invalid format is passed to `db.select().from(properties).where(eq(properties.id, id))`, PostgreSQL rejects it with:
+  `ERROR: invalid input syntax for type uuid`
+  Instead of cleanly returning a 404 page via `notFound()`, Next.js throws an unhandled server error (500).
+- Fix: Use standard UUID validation: `/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i` or `z.string().uuid().safeParse(id).success`.
+
+Bug 3: Unsanitized SQL LIKE Wildcards in Search Queries
+- Location: `src/lib/queries.ts:40, 41, 46, 47`
+- Code:
+  `ilike(properties.city, `%${filters.city}%`)`
+  `ilike(properties.title, `%${filters.q}%`)`
+- Failure: The `%` and `_` characters are not escaped. If a user searches for `50%` or `Villa_1`, PostgreSQL treats `%` as arbitrary string matches and `_` as single character wildcards, returning distorted search results or creating table scan performance bottlenecks.
+- Fix: Escape `%` and `_` with backslashes before injecting into `ilike` clauses.
+
+Bug 4: View Count Inflation & Resource Contention
+- Location: `src/lib/api-handler.ts:176` and `src/components/property-detail.tsx:30`
+- Code:
+  `await db.update(properties).set({ views: sql`${properties.views} + 1` }).where(eq(properties.id, property.id));`
+- Failure: Every GET request to `/api/properties/:id` and every page visit to `/property/:id` executes an immediate `UPDATE` query on the database.
+  1. A scraper or crawler requesting property pages rapidly locks rows in PostgreSQL.
+  2. Database read replicas cannot serve property details because every read triggers a write query.
+- Fix: Debounce views, store view counters in Redis/in-memory batches, or use dedicated asynchronous analytics events.
+
+Bug 5: Client-Side Hydration FOUC (Theme & Date Mismatch)
+- Location: `src/components/providers.tsx:70` and `src/components/site-shell.tsx:55`
+- Code:
+  `const stored = localStorage.getItem("aangan-theme");`
+  `if (stored === "dark") { setTheme("dark"); ... }`
+- Failure: The initial HTML rendered by Next.js server uses the default `"light"` theme. Upon hydration, client script checks `localStorage` and triggers `setTheme("dark")`. This results in an unsightly Flash of Unstyled Content (FOUC) and layout shifting on initial load.
+- Fix: Inject an inline script in `src/app/layout.tsx` before React hydration to read `localStorage` and set `data-theme` on `<html>`.
+
+
+================================================================================
+8. DATABASE SCHEMA, DRIZZLE ORM & DATA INTEGRITY DEFECTS
+================================================================================
+
+1. Redundant Roles Definition:
+   - In `src/db/schema.ts`, `users` table defines both:
+     `role: varchar("role", { length: 20 }).notNull().default("customer")`
+     `roles: jsonb("roles").$type<Array<"customer" | "owner" | "admin">>().notNull().default(["customer"])`
+   - In `src/lib/api-handler.ts:309`, role updates modify both fields:
+     `roles: input.addOwnerRole ? [...user.roles, "owner"] : user.roles`
+     `role: roles.includes("owner") && user.role !== "admin" ? "owner" : user.role`
+   - Having two fields representing the same conceptual entity causes data synchronization drifts if directly updated.
+
+2. Drizzle Configuration File Format:
+   - `drizzle.config.json` is deprecated in newer Drizzle Kit releases.
+   - Recommended replacement: `drizzle.config.ts` using `defineConfig({ ... })`.
+
+3. Missing Transaction Handling in Multi-Step Mutations:
+   - In `src/lib/api-handler.ts:229-238` (Lead Creation):
+     1. Inserts into `leads`
+     2. Inserts into `leadEvents`
+     3. Inserts into `notifications` (owner)
+     4. Inserts into `notifications` (seeker)
+   - These are executed as separate, non-atomic queries without `await db.transaction(async (tx) => { ... })`. If the database connection drops halfway, orphaned leads exist without events or notifications.
+
+
+================================================================================
+9. ARCHITECTURAL PATTERNS & PERFORMANCE CONSIDERATIONS
+================================================================================
+
+Strengths:
+- Clean Separation of Serializers: Privacy boundaries are strictly enforced through dedicated serializers (`serializePublicProperty`, `serializeCustomerLead`, `serializeOwnerLead`, `serializeAdminLead`), ensuring database columns are not leaked by default.
+- Dynamic Route Dispatcher: Clean centralized routing handler in `src/lib/api-handler.ts`.
+- Proper Async Request Handling: Adheres to Next.js 16 requirements with awaited `params` and `cookies()`.
+
+Areas for Improvement:
+- Component Size & Modularity: Large monolith components like `src/components/admin-experience.tsx` (112 lines of dense JSX), `src/components/member-experiences.tsx` (135 lines), and `src/components/post-property.tsx` (100 lines) should be decomposed into atomic, testable sub-components.
+- Image Asset Hosting: High reliance on external Pexels CDN image URLs without domain optimization in `next.config.ts`. If Pexels throttles or removes photos, broken images appear on the homepage.
+
+
+================================================================================
+10. STEP-BY-STEP REMEDIATION & IMPLEMENTATION ROADMAP
+================================================================================
+
+Phase 1: Fix High-Priority Bugs & Clean up ESLint Errors
+  Step 1.1: Fix `react-hooks/set-state-in-effect` across:
+            - `src/components/providers.tsx`
+            - `src/components/search-experience.tsx`
+            - `src/components/home-sections.tsx`
+            - `src/components/member-experiences.tsx`
+            - `src/components/admin-experience.tsx`
+            - `src/components/post-property.tsx`
+  Step 1.2: Escape all unescaped apostrophes and quotation entities in JSX (`&apos;`, `&#39;`).
+  Step 1.3: Replace or configure Next.js Image handling for `<img>` tags.
+  Step 1.4: Add photo array null-safety in `PropertyDetail` to prevent `NaN` gallery crashes.
+
+Phase 2: Fix Integration Test Runner & Automated Testing
+  Step 2.1: Add `"test": "tsx --test tests/privacy.test.ts"` to `package.json`.
+  Step 2.2: Implement an in-memory database mock (or Docker test helper) for `tests/privacy.integration.test.ts` so tests pass reliably in CI/CD without requiring external PostgreSQL.
+
+Phase 3: Harden Authentication & Security
+  Step 3.1: Enforce mandatory `AUTH_SECRET` in non-development environments.
+  Step 3.2: Require explicit `DEMO_MODE=true` rather than inferring from `127.0.0.1` database URL.
+  Step 3.3: Guard `timingSafeEqual` in `src/lib/auth.ts` by checking buffer length before comparison.
+  Step 3.4: Validate UUIDs using strict UUID regex in dynamic page routes (`src/app/property/[id]/page.tsx`).
+
+Phase 4: Database Transactions & Production Deployment
+  Step 4.1: Wrap multi-entity API operations in `db.transaction(...)`.
+  Step 4.2: Replace `drizzle.config.json` with `drizzle.config.ts` and add Drizzle migration scripts to `package.json`.
+  Step 4.3: Migrate file upload storage to S3/Cloudinary for cloud deployments.
+
+================================================================================
+                        END OF ANALYSIS REPORT
+================================================================================
