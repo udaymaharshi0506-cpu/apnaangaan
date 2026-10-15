@@ -19,10 +19,14 @@ if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL) {
   console.warn("⚠️ DATABASE_URL is not set in environment variables. Database operations will not succeed until DATABASE_URL is configured in Vercel.");
 }
 
+const cleanDatabaseUrl = isHostedPg
+  ? databaseUrl.replace(/[?&]sslmode=[^&]+/, "")
+  : databaseUrl;
+
 export const pool =
   globalForDb.__arenaNextJsPostgresqlPool ??
   new Pool({
-    connectionString: databaseUrl,
+    connectionString: cleanDatabaseUrl,
     ssl: isHostedPg ? { rejectUnauthorized: false } : undefined,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 10000,
