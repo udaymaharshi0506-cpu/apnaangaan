@@ -312,17 +312,23 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
   if (route === "locations" && method === "GET") {
     const q = (params.get("q") || "").toLowerCase().trim();
-    const rows = await db
-      .selectDistinct({ locality: properties.locality, city: properties.city })
-      .from(properties)
-      .where(eq(properties.status, "live"));
-    const combined = new Set<string>();
-    for (const row of rows) {
-      if (row.locality && row.city) combined.add(`${row.locality}, ${row.city}`);
-      if (row.city) combined.add(row.city);
+    const fallbackCities = ["Bengaluru", "Mumbai", "Delhi", "Gurugram", "Hyderabad", "Pune", "Jaipur", "Noida"];
+    try {
+      const rows = await db
+        .selectDistinct({ locality: properties.locality, city: properties.city })
+        .from(properties)
+        .where(eq(properties.status, "live"));
+      const combined = new Set<string>();
+      for (const row of rows) {
+        if (row.locality && row.city) combined.add(`${row.locality}, ${row.city}`);
+        if (row.city) combined.add(row.city);
+      }
+      const filtered = Array.from(combined).filter((item) => item.toLowerCase().includes(q)).slice(0, 8);
+      return respond({ suggestions: filtered.length > 0 ? filtered : fallbackCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8) });
+    } catch (err) {
+      console.warn("Locations lookup fallback due to DB connection:", err);
+      return respond({ suggestions: fallbackCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8) });
     }
-    const filtered = Array.from(combined).filter((item) => item.toLowerCase().includes(q)).slice(0, 8);
-    return respond({ suggestions: filtered });
   }
 
   // Public property responses always pass through the explicit PII-free serializer.
@@ -635,9 +641,25 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
 export async function dispatch(request: NextRequest, method: string, context: { params: Promise<{ segments: string[] }> }) {
   try { return await handle(request, method, (await context.params).segments); }
-  catch (error) {
+  catch (error: any) {
     if (error instanceof HttpError) return respond({ error: error.message }, error.status);
     if (error && typeof error === "object" && "code" in error && error.code === "23505") return respond({ error: "This record already exists." }, 409);
+    
+    const errString = String(error?.message || error?.cause?.message || error || "");
+    const isDbConnError =
+      errString.includes("ECONNREFUSED") ||
+      errString.includes("ETIMEDOUT") ||
+      errString.includes("ENOTFOUND") ||
+      error?.cause?.code === "ECONNREFUSED" ||
+      error?.code === "ECONNREFUSED";
+
+    if (isDbConnError) {
+      console.error("[Database Connection Error on API]:", errString);
+      return respond({
+        error: "Database connection failed. Please ensure DATABASE_URL is configured in your Vercel Project Settings."
+      }, 503);
+    }
+
     console.error("API request failed:", error);
     return respond({ error: "Something went wrong. Please try again." }, 500);
   }
