@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
-const fail = (status: number, message: string): never => { throw new HttpError(status, message); };
+function fail(status: number, message: string): never { throw new HttpError(status, message); }
 const uuid = z.string().uuid();
 const respond = (data: unknown, status = 200) => NextResponse.json(data, { status });
 const safeNumber = (value: string | null) => value !== null && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined;
