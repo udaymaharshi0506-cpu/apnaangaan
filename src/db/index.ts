@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
@@ -28,7 +29,7 @@ export const pool =
   new Pool({
     connectionString: cleanDatabaseUrl,
     ssl: isHostedPg ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 10000,
     max: 10,
   });

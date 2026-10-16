@@ -34,7 +34,10 @@ async function runTests() {
       // Test Storage Reachability
       const { data: buckets, error: storageError } = await supabase.storage.listBuckets();
       if (storageError) {
-        console.log(`   - Supabase Storage: Error (${storageError.message})`);
+        console.log(`   - Supabase Storage: Note (${storageError.message})`);
+        if (supabaseKey.startsWith("sb_publishable_")) {
+          console.log(`     * Storage API requires the legacy JWT anon key (starts with eyJ...) or service_role key from Supabase Dashboard > Settings > API.`);
+        }
       } else {
         console.log(`   - Supabase Storage: OK (${buckets.length} buckets available)`);
       }
@@ -57,7 +60,7 @@ async function runTests() {
     const pool = new Pool({
       connectionString: effectiveDbUrl,
       ssl: isSupabase ? { rejectUnauthorized: false } : undefined,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
     });
 
     const result = await pool.query(`

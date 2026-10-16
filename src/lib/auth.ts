@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { db } from "@/db";
 import { refreshTokens, users, type User } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
@@ -28,6 +29,10 @@ async function signedToken(subject: string, type: string, expiration: string, jt
   return token.sign(secret);
 }
 
+export async function createTestToken(userId: string) {
+  return signedToken(userId, "access", "1h");
+}
+
 async function verifiedToken(token: string, expectedType: string) {
   const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
   if (payload.type !== expectedType || !payload.sub) throw new Error("Invalid session");
@@ -42,7 +47,10 @@ export async function getAuthUser(request: Request): Promise<User | null> {
     const payload = await verifiedToken(token, "access");
     const [user] = await db.select().from(users).where(eq(users.id, payload.sub!)).limit(1);
     return user || null;
-  } catch { return null; }
+  } catch (err) {
+    console.error("[Auth] getAuthUser error:", err);
+    return null;
+  }
 }
 
 export async function getServerUser(): Promise<User | null> {

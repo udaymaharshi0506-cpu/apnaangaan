@@ -161,6 +161,15 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS uploaded_images (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  filename VARCHAR(255) NOT NULL,
+  content_type VARCHAR(100) NOT NULL,
+  data TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 
 -- 3. Indexes
 -- ============================================================
@@ -180,6 +189,7 @@ CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS call_logs_lead_idx ON admin_call_logs(lead_id);
 CREATE INDEX IF NOT EXISTS lead_events_lead_idx ON lead_events(lead_id);
 CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS uploaded_images_created_idx ON uploaded_images(created_at);
 
 
 -- 4. Row Level Security — disabled (app handles auth in its own API layer)
@@ -196,8 +206,10 @@ ALTER TABLE lead_events DISABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_searches DISABLE ROW LEVEL SECURITY;
 ALTER TABLE otp_challenges DISABLE ROW LEVEL SECURITY;
 ALTER TABLE refresh_tokens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE uploaded_images DISABLE ROW LEVEL SECURITY;
 
 
 -- 5. Done!
 -- ============================================================
 -- Your database is ready. Now set DATABASE_URL in .env and run the app.
+

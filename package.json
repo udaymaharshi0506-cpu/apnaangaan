@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "test:connections": "tsx scripts/test-connections.ts",
+    "test:uploads": "tsx scripts/test-uploads.ts",
     "verify": "tsx scripts/verify-full-app.ts"
   },
   "dependencies": {

@@ -1,11 +1,11 @@
 import { db } from "@/db";
-import { adminCallLogs, favorites, leadEvents, leads, meetings, notifications, otpChallenges, properties, savedSearches, users, type Lead, type Property, type User } from "@/db/schema";
+import { adminCallLogs, favorites, leadEvents, leads, meetings, notifications, otpChallenges, properties, savedSearches, uploadedImages, users, type Lead, type Property, type User } from "@/db/schema";
 import { attachAdminChallenge, attachSession, clearSession, getAuthUser, getPendingAdmin, hasRole, publicSelf, rotateSession, verifyAdminCode } from "@/lib/auth";
 import { findProperties, getProperty } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
 import { serializeAdminLead, serializeCustomerLead, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
 import { compare } from "bcryptjs";
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -508,39 +508,132 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (!hasRole(user, "owner") && !hasRole(user, "admin")) fail(403, "Only property owners and administrators can upload listing photos.");
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 5 MB.");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024 || file.size === 0) throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 5 MB.");
-    const bytes = Buffer.from(await file.arrayBuffer());
-    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
-      const timestamp = Math.floor(Date.now() / 1000);
-      const folder = "aangan/properties";
-      const signature = createHash("sha1").update(`folder=${folder}&timestamp=${timestamp}${process.env.CLOUDINARY_API_SECRET}`).digest("hex");
-      const upload = new FormData();
-      upload.append("file", new Blob([new Uint8Array(bytes)], { type: file.type }), file.name);
-      upload.append("api_key", process.env.CLOUDINARY_API_KEY);
-      upload.append("timestamp", String(timestamp));
-      upload.append("folder", folder);
-      upload.append("signature", signature);
-      const result = await fetch(`https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: upload });
-      if (!result.ok) fail(502, "Image upload failed. Please try again.");
-      const data = await result.json() as { secure_url: string };
-      return respond({ url: data.secure_url }, 201);
+    if (!(file instanceof File)) throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 10 MB.");
+    
+    const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/jpg"];
+    const fileType = file.type || (file.name.endsWith(".png") ? "image/png" : file.name.endsWith(".webp") ? "image/webp" : "image/jpeg");
+    if (!allowedMimes.includes(fileType) && !file.name.match(/\.(jpg|jpeg|png|webp|heic|heif)$/i)) {
+      throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 10 MB.");
     }
-    const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+    if (file.size > 10 * 1024 * 1024 || file.size === 0) throw new HttpError(422, "Upload an image under 10 MB.");
+    const bytes = Buffer.from(await file.arrayBuffer());
+
+    // 1. Cloudinary upload (if configured)
+    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+      try {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const folder = "aangan/properties";
+        const signature = createHash("sha1").update(`folder=${folder}&timestamp=${timestamp}${process.env.CLOUDINARY_API_SECRET}`).digest("hex");
+        const upload = new FormData();
+        upload.append("file", new Blob([new Uint8Array(bytes)], { type: fileType }), file.name);
+        upload.append("api_key", process.env.CLOUDINARY_API_KEY);
+        upload.append("timestamp", String(timestamp));
+        upload.append("folder", folder);
+        upload.append("signature", signature);
+        const result = await fetch(`https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: upload });
+        if (result.ok) {
+          const data = await result.json() as { secure_url: string };
+          return respond({ url: data.secure_url }, 201);
+        }
+      } catch (err) {
+        console.warn("[Uploads] Cloudinary upload failed:", err);
+      }
+    }
+
+    // 2. Supabase Storage (if configured with JWT or service role key)
+    if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || (process.env.SUPABASE_ANON_KEY && !process.env.SUPABASE_ANON_KEY.startsWith("sb_publishable_")))) {
+      try {
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!;
+        const ext = fileType === "image/png" ? "png" : fileType === "image/webp" ? "webp" : "jpg";
+        const filename = `${randomUUID()}.${ext}`;
+        const uploadRes = await fetch(`${process.env.SUPABASE_URL}/storage/v1/object/property-images/${filename}`, {
+          method: "POST",
+          headers: {
+            "apikey": key,
+            "Authorization": `Bearer ${key}`,
+            "Content-Type": fileType,
+          },
+          body: bytes,
+        });
+        if (uploadRes.ok) {
+          const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/property-images/${filename}`;
+          return respond({ url: publicUrl }, 201);
+        }
+      } catch (err) {
+        console.warn("[Uploads] Supabase storage upload failed:", err);
+      }
+    }
+
+    // 3. PostgreSQL Database-backed storage (100% reliable on Vercel and locally)
+    const ext = fileType === "image/png" ? "png" : fileType === "image/webp" ? "webp" : "jpg";
     const filename = `${randomUUID()}.${ext}`;
-    const folder = path.join(process.cwd(), "public", "uploads");
-    await mkdir(folder, { recursive: true });
-    await writeFile(path.join(folder, filename), bytes);
-    return respond({ url: `/api/uploads/${filename}` }, 201);
+    const base64Data = bytes.toString("base64");
+
+    const [record] = await db.insert(uploadedImages).values({
+      filename,
+      contentType: fileType === "image/png" ? "image/png" : fileType === "image/webp" ? "image/webp" : "image/jpeg",
+      data: base64Data,
+      size: bytes.length,
+    }).returning({ id: uploadedImages.id });
+
+    // In local development, mirror to filesystem if possible
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const folder = path.join(process.cwd(), "public", "uploads");
+        await mkdir(folder, { recursive: true });
+        await writeFile(path.join(folder, `${record.id}.${ext}`), bytes);
+      } catch {
+        // Safe to ignore in environments with read-only file systems
+      }
+    }
+
+    return respond({ url: `/api/uploads/${record.id}.${ext}` }, 201);
   }
   if (segments[0] === "uploads" && segments.length === 2 && method === "GET") {
-    const filename = segments[1];
-    if (!/^[a-f0-9-]{36}\.(jpg|png|webp)$/.test(filename)) fail(404, "Image not found.");
+    const rawFilename = segments[1];
+    const idMatch = rawFilename.match(/^([a-f0-9-]{36})(\.(jpg|png|webp))?$/);
+    if (!idMatch) fail(404, "Image not found.");
+
+    const imageId = idMatch[1];
+    const ext = idMatch[3] || "jpg";
+    const localFilename = idMatch[3] ? rawFilename : `${imageId}.${ext}`;
+
+    // 1. Try local filesystem cache first
     try {
-      const bytes = await readFile(path.join(process.cwd(), "public", "uploads", filename));
-      const contentType = filename.endsWith("png") ? "image/png" : filename.endsWith("webp") ? "image/webp" : "image/jpeg";
-      return new NextResponse(new Uint8Array(bytes), { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
-    } catch { fail(404, "Image not found."); }
+      const bytes = await readFile(path.join(process.cwd(), "public", "uploads", localFilename));
+      const contentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      return new NextResponse(new Uint8Array(bytes), {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    } catch {
+      // Not on local filesystem, query database
+    }
+
+    // 2. Query uploaded_images table in database
+    try {
+      const [record] = await db
+        .select()
+        .from(uploadedImages)
+        .where(or(eq(uploadedImages.id, imageId), eq(uploadedImages.filename, rawFilename)))
+        .limit(1);
+
+      if (record) {
+        const bytes = Buffer.from(record.data, "base64");
+        return new NextResponse(new Uint8Array(bytes), {
+          headers: {
+            "Content-Type": record.contentType || "image/jpeg",
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
+    } catch (dbErr) {
+      console.error("[Uploads] Database image retrieval error:", dbErr);
+    }
+
+    fail(404, "Image not found.");
   }
 
   // Every endpoint below requires admin authorization before using AdminLeadSerializer.

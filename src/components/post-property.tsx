@@ -18,19 +18,56 @@ const amenityOptions = ["Covered Parking", "Balcony", "Power Backup", "Security"
 type FormDataState = { category: string; propertyType: string; title: string; description: string; address: string; city: string; locality: string; latitude: string; longitude: string; bhkOrRoomType: string; areaSqft: string; bathrooms: string; furnishingStatus: string; amenities: string[]; images: string[]; price: string; priceType: string; availabilityDate: string; deposit: string; reraNumber: string };
 const initial: FormDataState = { category: "", propertyType: "", title: "", description: "", address: "", city: "Bengaluru", locality: "", latitude: "", longitude: "", bhkOrRoomType: "", areaSqft: "", bathrooms: "1", furnishingStatus: "Unfurnished", amenities: [], images: [], price: "", priceType: "fixed", availabilityDate: "", deposit: "", reraNumber: "" };
 
-async function compressImage(file: File) {
-  if (file.size < 900000) return file;
+async function compressImage(file: File): Promise<File> {
+  if (file.size < 500000 && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) return file;
   try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    let img: ImageBitmap | HTMLImageElement;
+    let width = 0, height = 0;
+    if (typeof createImageBitmap === "function") {
+      try {
+        img = await createImageBitmap(file);
+        width = img.width;
+        height = img.height;
+      } catch {
+        img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = reject;
+          image.src = URL.createObjectURL(file);
+        });
+        width = img.width;
+        height = img.height;
+      }
+    } else {
+      img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = URL.createObjectURL(file);
+      });
+      width = img.width;
+      height = img.height;
+    }
+
+    const maxDim = 1600;
+    const scale = Math.min(1, maxDim / Math.max(width, height));
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", .82));
-    return blob ? new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }) : file;
-  } catch { return file; }
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if ("close" in img && typeof img.close === "function") img.close();
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob) return file;
+    const cleanName = file.name.replace(/\.[^.]+$/, ".jpg");
+    return new File([blob], cleanName, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
 }
+
 
 export function PostPropertyExperience() {
   const { user, loading, refreshUser, toast } = useApp();
@@ -58,14 +95,28 @@ export function PostPropertyExperience() {
   }
   async function upload(files: FileList | null) {
     if (!files?.length) return;
-    setUploading(true); setError("");
-    for (const file of Array.from(files).slice(0, 12 - form.images.length)) {
+    setUploading(true);
+    setError("");
+    const remainingSlots = 12 - form.images.length;
+    const toUpload = Array.from(files).slice(0, remainingSlots);
+    let lastError = "";
+
+    for (const file of toUpload) {
       try {
         const compressed = await compressImage(file);
-        const payload = new FormData(); payload.append("file", compressed);
+        const payload = new FormData();
+        payload.append("file", compressed);
         const data = await apiFetch<{ url: string }>("/api/uploads", { method: "POST", body: payload });
-        setForm((old) => ({ ...old, images: [...old.images, data.url] }));
-      } catch (problem) { setError(problem instanceof Error ? problem.message : "Couldn't upload that photo."); }
+        if (data.url) {
+          setForm((old) => ({ ...old, images: [...old.images, data.url] }));
+        }
+      } catch (problem) {
+        lastError = problem instanceof Error ? problem.message : "Couldn't upload that photo.";
+      }
+    }
+
+    if (lastError) {
+      setError(lastError);
     }
     setUploading(false);
     if (fileInput.current) fileInput.current.value = "";
@@ -115,7 +166,7 @@ export function PostPropertyExperience() {
   {step === 1 && <div className="post-step-content"><h2>Tell your story.</h2><p>The little details help someone picture life in your space.</p><label className="form-label" htmlFor="post-title">LISTING TITLE</label><input id="post-title" className="form-input" value={form.title} onChange={(e) => update({ title: e.target.value })} placeholder="e.g. A light-filled 2 BHK in Indiranagar" maxLength={180}/><span className="field-tip">Keep it clear, warm and specific. At least 8 characters.</span><label className="form-label" htmlFor="post-description">DESCRIPTION</label><textarea id="post-description" className="form-input" rows={7} value={form.description} onChange={(e) => update({ description: e.target.value })} placeholder="What makes this place special? Tell us about the light, the neighbourhood, or your favourite little corner..." maxLength={5000}/><span className="field-tip">At least 25 characters. Contact details are not allowed in descriptions.</span></div>}
   {step === 2 && <div className="post-step-content"><h2>Where is it?</h2><p>Help seekers get a feel for the neighbourhood.</p><div className="form-two-cols"><div><label className="form-label">CITY</label><input className="form-input" value={form.city} onChange={(e) => update({ city: e.target.value })} placeholder="Bengaluru"/></div><div><label className="form-label">LOCALITY</label><input className="form-input" value={form.locality} onChange={(e) => update({ locality: e.target.value })} placeholder="e.g. Koramangala"/></div></div><label className="form-label">STREET ADDRESS</label><input className="form-input" value={form.address} onChange={(e) => update({ address: e.target.value })} placeholder="Building name, street, area"/><div className="form-two-cols"><div><label className="form-label">LATITUDE <small>(OPTIONAL)</small></label><input className="form-input" type="number" step="any" value={form.latitude} onChange={(e) => update({ latitude: e.target.value })} placeholder="12.9352"/></div><div><label className="form-label">LONGITUDE <small>(OPTIONAL)</small></label><input className="form-input" type="number" step="any" value={form.longitude} onChange={(e) => update({ longitude: e.target.value })} placeholder="77.6245"/></div></div><div className="post-map-preview"><iframe title="Location preview" src={mapUrl} loading="lazy"/><span><MapPin size={15}/> Approximate map preview</span></div><p className="field-tip"><LockKeyhole size={14}/> We only use the location to show the property on a map. No owner details are shared.</p></div>}
   {step === 3 && <div className="post-step-content"><h2>The thoughtful details.</h2><p>Help the right person see why this place feels right.</p><div className="form-two-cols"><div><label className="form-label">{form.category === "rent_pg" ? "ROOM TYPE" : form.category === "rent_commercial" ? "SPACE TYPE" : "BEDROOMS"}</label><input className="form-input" value={form.bhkOrRoomType} onChange={(e) => update({ bhkOrRoomType: e.target.value })} placeholder={form.category === "rent_pg" ? "Private room" : form.category === "rent_commercial" ? "Office space" : "e.g. 2 BHK"}/></div><div><label className="form-label">AREA IN SQFT</label><input className="form-input" type="number" min="1" value={form.areaSqft} onChange={(e) => update({ areaSqft: e.target.value })} placeholder="e.g. 1200"/></div></div><div className="form-two-cols"><div><label className="form-label">BATHROOMS</label><input className="form-input" type="number" min="0" value={form.bathrooms} onChange={(e) => update({ bathrooms: e.target.value })}/></div><div><label className="form-label">FURNISHING</label><select className="form-input" value={form.furnishingStatus} onChange={(e) => update({ furnishingStatus: e.target.value })}><option>Unfurnished</option><option>Semi-furnished</option><option>Fully furnished</option></select></div></div><label className="form-label">AMENITIES <small>(SELECT ALL THAT APPLY)</small></label><div className="amenity-choices">{amenityOptions.map((item) => <button key={item} className={form.amenities.includes(item) ? "selected" : ""} onClick={() => update({ amenities: form.amenities.includes(item) ? form.amenities.filter((a) => a !== item) : [...form.amenities, item] })}>{form.amenities.includes(item) ? <Check size={14}/> : <Plus size={14}/>} {item}</button>)}</div></div>}
-  {step === 4 && <div className="post-step-content"><h2>Show it off.</h2><p>Good photos let people imagine their own story here. Add up to 12.</p><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(e) => void upload(e.target.files)}/><button className="upload-zone" disabled={uploading || form.images.length >= 12} onClick={() => fileInput.current?.click()}><span><CloudUpload size={29}/></span><strong>{uploading ? "Uploading your photos..." : "Click to upload photos"}</strong><small>JPG, PNG or WebP · up to 5 MB each</small></button>{form.images.length > 0 && <div className="uploaded-grid">{form.images.map((image, index) => <div key={`${image}-${index}`}><img src={image} alt={`Property photo ${index + 1}`}/>{index === 0 && <span>Cover photo</span>}<button onClick={() => update({ images: form.images.filter((_, photoIndex) => photoIndex !== index) })} aria-label={`Remove photo ${index + 1}`}><Trash2 size={15}/></button></div>)}</div>}<div className="image-url-field"><input className="form-input" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Or paste an https:// image URL"/><button onClick={() => { if (imageUrl.startsWith("https://")) { update({ images: [...form.images, imageUrl] }); setImageUrl(""); } else setError("Please enter a secure https:// image URL."); }}><Plus size={16}/> Add</button></div></div>}
+  {step === 4 && <div className="post-step-content"><h2>Show it off.</h2><p>Good photos let people imagine their own story here. Add up to 12.</p><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" multiple hidden onChange={(e) => void upload(e.target.files)}/><button className="upload-zone" disabled={uploading || form.images.length >= 12} onClick={() => fileInput.current?.click()}><span><CloudUpload size={29}/></span><strong>{uploading ? "Uploading your photos..." : "Click to upload photos"}</strong><small>JPG, PNG or WebP · up to 10 MB each</small></button>{form.images.length > 0 && <div className="uploaded-grid">{form.images.map((image, index) => <div key={`${image}-${index}`}><img src={image} alt={`Property photo ${index + 1}`}/>{index === 0 && <span>Cover photo</span>}<button onClick={() => update({ images: form.images.filter((_, photoIndex) => photoIndex !== index) })} aria-label={`Remove photo ${index + 1}`}><Trash2 size={15}/></button></div>)}</div>}<div className="image-url-field"><input className="form-input" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Or paste an https:// image URL"/><button onClick={() => { if (imageUrl.startsWith("https://")) { update({ images: [...form.images, imageUrl] }); setImageUrl(""); } else setError("Please enter a secure https:// image URL."); }}><Plus size={16}/> Add</button></div></div>}
   {step === 5 && <div className="post-step-content"><h2>Set your terms.</h2><p>Be clear about pricing so the right people can find you.</p><div className="form-two-cols"><div><label className="form-label">{form.category === "buy_home" ? "ASKING PRICE (₹)" : "MONTHLY RENT (₹)"}</label><input className="form-input" type="number" min="1" value={form.price} onChange={(e) => update({ price: e.target.value })} placeholder="e.g. 45000"/></div><div><label className="form-label">PRICE TYPE</label><select className="form-input" value={form.priceType} onChange={(e) => update({ priceType: e.target.value })}><option value="fixed">Fixed</option><option value="negotiable">Negotiable</option></select></div></div><div className="form-two-cols"><div><label className="form-label">AVAILABLE FROM <small>(OPTIONAL)</small></label><input className="form-input" type="date" value={form.availabilityDate} onChange={(e) => update({ availabilityDate: e.target.value })}/></div>{form.category !== "buy_home" && <div><label className="form-label">SECURITY DEPOSIT (₹) <small>(OPTIONAL)</small></label><input className="form-input" type="number" min="0" value={form.deposit} onChange={(e) => update({ deposit: e.target.value })} placeholder="e.g. 90000"/></div>}</div>{form.category === "buy_home" && <><label className="form-label">RERA REGISTRATION NUMBER <small>(IF APPLICABLE)</small></label><input className="form-input" value={form.reraNumber} onChange={(e) => update({ reraNumber: e.target.value })} placeholder="Project RERA registration number"/><p className="field-tip">Include this for projects where RERA registration is required.</p></>}</div>}
   {step === 6 && <div className="post-step-content"><h2>One last look.</h2><p>Make sure everything feels right before you send it to our team.</p><div className="post-review-card">{form.images[0] && <img src={form.images[0]} alt="Listing cover"/>}<div><span>{currentCategory?.label} · {form.propertyType}</span><h3>{form.title}</h3><p><MapPin size={15}/> {form.locality}, {form.city}</p><strong>₹{Number(form.price).toLocaleString("en-IN")}{form.category !== "buy_home" ? "/mo" : ""}</strong></div></div><div className="review-list"><div><span>Property type</span><strong>{form.propertyType}</strong></div><div><span>Area</span><strong>{form.areaSqft} sqft</strong></div><div><span>Furnishing</span><strong>{form.furnishingStatus}</strong></div><div><span>Amenities</span><strong>{form.amenities.length} selected</strong></div><div><span>Photos</span><strong>{form.images.length} added</strong></div></div><div className="review-assurance"><BadgeCheck size={23}/><div><strong>Verified first. Live second.</strong><p>Our team will review your listing before it appears in search. You’ll be notified when it’s approved.</p></div></div></div>}
   {error && <div className="form-error" role="alert">{error}</div>}<div className="post-form-footer">{step > 0 ? <button className="post-back" onClick={() => { setStep(step - 1); setError(""); }}><ArrowLeft size={17}/> Previous</button> : <span/>}<button className="btn btn-primary" disabled={submitting || uploading} onClick={() => step === 6 ? void submit() : nextStep()}>{step === 6 ? submitting ? "Submitting..." : "Submit for verification" : "Continue"} {step === 6 ? <Check size={17}/> : <ArrowRight size={17}/>}</button></div></div></div></div></main>;

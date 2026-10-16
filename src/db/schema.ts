@@ -135,7 +135,18 @@ export const refreshTokens = pgTable("refresh_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("refresh_tokens_user_idx").on(table.userId)]);
 
+export const uploadedImages = pgTable("uploaded_images", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  contentType: varchar("content_type", { length: 100 }).notNull(),
+  data: text("data").notNull(),
+  size: integer("size").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("uploaded_images_created_idx").on(table.createdAt)]);
+
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;
+export type UploadedImage = typeof uploadedImages.$inferSelect;
+
