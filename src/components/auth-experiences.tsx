@@ -135,19 +135,9 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
             {/* ── Email form ──────────────────────────── */}
             {step === "email" ? (
               <form onSubmit={(e) => void requestCode(e)}>
-                <label className="form-label">GMAIL / EMAIL ADDRESS</label>
-                <div style={{ position: "relative", marginBottom: "16px" }}>
-                  <Mail
-                    size={18}
-                    style={{
-                      position: "absolute",
-                      left: "14px",
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      color: "var(--muted)",
-                      pointerEvents: "none",
-                    }}
-                  />
+                <label className="form-label" htmlFor="login-email">GMAIL / EMAIL ADDRESS</label>
+                <div className="auth-input-wrap">
+                  <Mail className="auth-input-icon" size={18} />
                   <input
                     id="login-email"
                     type="email"
@@ -158,7 +148,6 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
                     autoComplete="email"
                     aria-label="Email address"
                     className="form-input"
-                    style={{ paddingLeft: "42px" }}
                   />
                 </div>
                 <button
@@ -173,20 +162,22 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
             ) : (
               /* ── OTP form ──────────────────────────── */
               <form onSubmit={(e) => void verifyCode(e)}>
-                <label className="form-label">6-DIGIT VERIFICATION CODE</label>
-                <input
-                  id="login-otp-input"
-                  className="otp-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="• • • • • •"
-                  autoFocus
-                  required
-                  aria-label="6-digit verification code"
-                />
+                <label className="form-label" htmlFor="login-otp-input">6-DIGIT VERIFICATION CODE</label>
+                <div className="auth-input-wrap">
+                  <input
+                    id="login-otp-input"
+                    className="otp-input"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder="• • • • • •"
+                    autoFocus
+                    required
+                    aria-label="6-digit verification code"
+                  />
+                </div>
                 <button
                   id="login-verify-btn"
                   className="btn btn-primary btn-full"

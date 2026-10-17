@@ -120,7 +120,7 @@ async function sendResendOtp(email: string, code: string): Promise<{ success: bo
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) return { success: false, error: "RESEND_API_KEY is not configured." };
   try {
-    const from = process.env.RESEND_FROM_EMAIL?.trim() || "Aangan <onboarding@resend.dev>";
+    const from = process.env.RESEND_FROM_EMAIL?.trim() || "Aangan <info@apnaangaan.in>";
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {

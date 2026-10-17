@@ -97,7 +97,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
       <div className="footer-col"><h4>For you</h4>{isUserOwner ? <><Link href="/owner">Owner dashboard</Link><Link href="/post-property">List a property</Link></> : isUserAdmin ? <><Link href="/admin">Admin Workspace</Link><Link href="/admin/leads">Lead Inbox</Link></> : <><Link href="/saved">Saved homes</Link><Link href="/inquiries">My inquiries</Link></>}<Link href="/profile">My profile</Link></div>
       <div className="footer-col"><h4>Aangan</h4><Link href="/privacy">Privacy policy</Link><Link href="/welcome">How it works</Link><Link href="/admin">Team portal <ArrowUpRight size={13}/></Link><a href="mailto:hello@aangan.example">Get in touch</a></div>
     </div><div className="container footer-bottom"><span>© {new Date().getFullYear()} Aangan. Made for the place you call home.</span><span>Thoughtfully built for India <span className="footer-heart">♥</span></span></div></footer>}
-    {!isPropertyDetail && (
+    {!isPropertyDetail && !isAuth && (
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
         {mobileTabs.map(({ label, href, Icon }) => <Link key={label} href={href} className={`tab-item ${pathname === href ? "active" : ""}`}><Icon size={21} strokeWidth={pathname === href ? 2.3 : 1.8}/><span>{label}</span></Link>)}
       </nav>
