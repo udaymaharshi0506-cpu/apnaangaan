@@ -252,14 +252,15 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
 
 // ─────────────────────────────────────────────────────────────
 // SetupExperience
-// Onboarding step: collect name, optional email, and role.
-// Shown after first-time OTP verify (needsOnboarding = true).
+// Onboarding step: collect name, phone number, and role.
+// Shown after first-time verify or when phone/name is missing.
 // ─────────────────────────────────────────────────────────────
 export function SetupExperience({ next = "/" }: { next?: string }) {
   const { user, refreshUser, toast } = useApp();
   const router = useRouter();
 
   const [name, setName] = useState(user?.name || "");
+  const [phone, setPhone] = useState(user?.phone || "");
   const [role, setRole] = useState<"customer" | "owner">("customer");
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -267,21 +268,40 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
 
   useEffect(() => {
     if (user?.name && !name) setName(user.name);
+    if (user?.phone && !phone) setPhone(user.phone);
   }, [user]);
+
+  const cleanDigits = phone.trim().replace(/[\s\-\(\)]/g, "");
+  const isPhoneValid = cleanDigits.length >= 10;
+  const isFormValid = name.trim().length >= 2 && isPhoneValid && consent;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+
+    if (!name.trim() || name.trim().length < 2) {
+      setError("Please enter your full name.");
+      return;
+    }
+
+    if (!cleanDigits || cleanDigits.length < 10) {
+      setError("Please enter a valid phone number (at least 10 digits).");
+      return;
+    }
+
     if (!consent) {
       setError("Please agree to the privacy notice to continue.");
       return;
     }
+
     setBusy(true);
     try {
       await apiFetch("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          name,
+          name: name.trim(),
+          phone: cleanDigits,
+          role,
           addOwnerRole: role === "owner",
           consent: true,
         }),
@@ -313,11 +333,11 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
         <h1>
           Let&apos;s get to know <em>you.</em>
         </h1>
-        <p>Just the essentials for a more personal, private experience.</p>
+        <p>Just the essentials for a personal, verified, and secure experience.</p>
 
         <form onSubmit={(e) => void submit(e)}>
           <label className="form-label" htmlFor="setup-name">
-            YOUR NAME
+            YOUR NAME <span style={{ color: "#dc2626" }}>*</span>
           </label>
           <input
             id="setup-name"
@@ -326,10 +346,31 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
             onChange={(e) => setName(e.target.value)}
             minLength={2}
             required
-            placeholder="What should we call you?"
+            placeholder="e.g. Rahul Sharma"
           />
 
-          <label className="form-label">I&apos;M HERE TO...</label>
+          <label className="form-label" htmlFor="setup-phone" style={{ marginTop: "18px" }}>
+            PHONE NUMBER <span style={{ color: "#dc2626" }}>*</span>
+          </label>
+          <div className="phone-field" style={{ marginBottom: "6px" }}>
+            <span>+91</span>
+            <input
+              id="setup-phone"
+              type="tel"
+              value={phone.replace(/^\+91/, "")}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+              placeholder="98765 43210"
+              autoComplete="tel"
+            />
+          </div>
+          <small style={{ display: "block", color: "var(--muted)", fontSize: "11px", marginBottom: "16px" }}>
+            Required for contact &amp; scheduling viewings. Never shared publicly.
+          </small>
+
+          <label className="form-label">
+            I&apos;M HERE AS... <span style={{ color: "#dc2626" }}>*</span>
+          </label>
           <div className="role-options">
             <button
               type="button"
@@ -338,8 +379,8 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
               onClick={() => setRole("customer")}
             >
               <Home size={23} />
-              <strong>Find a place</strong>
-              <span>Buy, rent, or explore</span>
+              <strong>Home Seeker</strong>
+              <span>Find, rent, or buy a space</span>
               <Check size={18} className="role-check" />
             </button>
             <button
@@ -349,18 +390,19 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
               onClick={() => setRole("owner")}
             >
               <KeyRound size={23} />
-              <strong>List a place</strong>
-              <span>Share your property</span>
+              <strong>Owner / Rent</strong>
+              <span>List &amp; manage your property</span>
               <Check size={18} className="role-check" />
             </button>
           </div>
 
-          <label className="consent-label">
+          <label className="consent-label" style={{ marginTop: "20px" }}>
             <input
               id="setup-consent"
               type="checkbox"
               checked={consent}
               onChange={(e) => setConsent(e.target.checked)}
+              required
             />
             <span>
               I agree to Aangan collecting and using my details to help with my
@@ -375,7 +417,7 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
           <button
             id="setup-submit-btn"
             className="btn btn-primary btn-full"
-            disabled={busy || !name.trim()}
+            disabled={busy || !isFormValid}
           >
             {busy ? "Saving…" : "Let's get started"} <ArrowRight size={18} />
           </button>

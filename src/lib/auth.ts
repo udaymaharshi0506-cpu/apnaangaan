@@ -66,7 +66,17 @@ export async function getServerUser(): Promise<User | null> {
 export const hasRole = (user: User | null, role: "customer" | "owner" | "admin") => !!user && user.roles.includes(role);
 
 export function publicSelf(user: User) {
-  return { id: user.id, phone: user.phone, email: user.email, name: user.name, role: user.role, roles: user.roles, consentAt: user.consentAt, needsOnboarding: !user.name || !user.consentAt };
+  const isAdmin = user.roles.includes("admin") || user.role === "admin";
+  return {
+    id: user.id,
+    phone: user.phone,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    roles: user.roles,
+    consentAt: user.consentAt,
+    needsOnboarding: isAdmin ? false : (!user.name || !user.consentAt || !user.phone),
+  };
 }
 
 export async function attachSession(response: NextResponse, user: User) {

@@ -31,12 +31,28 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UsersRound,
   X,
 } from "lucide-react";
 import { Brand } from "@/components/site-shell";
 import { apiFetch, useApp } from "@/components/providers";
 import { categoryLabel, formatPrice } from "@/lib/format";
 import type { PublicProperty } from "@/lib/serializers";
+
+export type AdminUser = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  role: string;
+  roles: Array<"customer" | "owner" | "admin">;
+  category: "customer" | "owner" | "admin";
+  categoryLabel: string;
+  consentAt: string | null;
+  createdAt: string;
+  listingsCount: number;
+  inquiriesCount: number;
+};
 
 export type AdminLead = {
   id: string;
@@ -65,6 +81,9 @@ export type Stats = {
   inquiryTotal: number;
   pendingListings: number;
   totalListings?: number;
+  totalUsers?: number;
+  seekerCount?: number;
+  ownerCount?: number;
   inquiriesByDay: Array<{ day: string; total: number }>;
   conversionRate: number;
 };
@@ -809,11 +828,12 @@ function LeadDetail({
 export function AdminDashboardExperience() {
   const router = useRouter();
   const { user, logout, toast } = useApp();
-  const [view, setView] = useState<"overview" | "properties" | "moderation" | "leads">("overview");
+  const [view, setView] = useState<"overview" | "properties" | "moderation" | "leads" | "users">("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [leads, setLeads] = useState<AdminLead[]>([]);
   const [moderation, setModeration] = useState<ModeratedProperty[]>([]);
   const [allProperties, setAllProperties] = useState<ModeratedProperty[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
 
   // Selection modals
   const [selectedLead, setSelectedLead] = useState<AdminLead | null>(null);
@@ -824,6 +844,10 @@ export function AdminDashboardExperience() {
   const [propStatusFilter, setPropStatusFilter] = useState("all");
   const [propCategoryFilter, setPropCategoryFilter] = useState("");
   const [propSearch, setPropSearch] = useState("");
+  const [userCategoryTab, setUserCategoryTab] = useState<"all" | "customer" | "owner">("all");
+  const [userSearch, setUserSearch] = useState("");
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [totalUsers, setTotalUsers] = useState(0);
   const [mobileMenu, setMobileMenu] = useState(false);
 
   const load = useCallback(async () => {
@@ -862,6 +886,24 @@ export function AdminDashboardExperience() {
     }
   }, [propStatusFilter, propCategoryFilter, propSearch, selectedProperty, toast]);
 
+  const loadUsers = useCallback(async () => {
+    setLoadingUsers(true);
+    try {
+      const params = new URLSearchParams();
+      if (userCategoryTab !== "all") params.set("role", userCategoryTab);
+      if (userSearch.trim()) params.set("q", userSearch.trim());
+      params.set("limit", "100");
+
+      const data = await apiFetch<{ items: AdminUser[]; total: number }>(`/api/admin/users?${params.toString()}`);
+      setUsers(data.items);
+      setTotalUsers(data.total);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Couldn't load users", "error");
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [userCategoryTab, userSearch, toast]);
+
   useEffect(() => {
     void load();
   }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -871,6 +913,12 @@ export function AdminDashboardExperience() {
       void loadProperties();
     }
   }, [view, propStatusFilter, propCategoryFilter, propSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view === "users") {
+      void loadUsers();
+    }
+  }, [view, userCategoryTab, userSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function quickModerate(id: string, action: "approve" | "reject" | "flag") {
     try {
@@ -899,6 +947,7 @@ export function AdminDashboardExperience() {
           {[
             { value: "overview", label: "Overview", Icon: LayoutDashboard },
             { value: "properties", label: "All Properties", Icon: Home, count: totalListings },
+            { value: "users", label: "Registered Users", Icon: UsersRound, count: stats?.totalUsers || totalUsers },
             { value: "moderation", label: "Listing moderation", Icon: BadgeCheck, count: pending },
             { value: "leads", label: "Lead inbox", Icon: ClipboardList, count: stats?.inquiryTotal },
           ].map(({ value, label, Icon, count }) => (
@@ -942,6 +991,8 @@ export function AdminDashboardExperience() {
                 ? "Overview"
                 : view === "properties"
                 ? "All Properties"
+                : view === "users"
+                ? "Registered Users"
                 : view === "leads"
                 ? "Lead inbox"
                 : "Listing moderation"}
@@ -999,6 +1050,18 @@ export function AdminDashboardExperience() {
                 </div>
                 <div
                   className="admin-stat-card"
+                  onClick={() => setView("users")}
+                  style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
+                >
+                  <span className="stat-icon purple">
+                    <UsersRound size={21} />
+                  </span>
+                  <span>Registered Users</span>
+                  <strong>{stats?.totalUsers || totalUsers || 0}</strong>
+                  <small>{stats?.seekerCount || 0} Seekers · {stats?.ownerCount || 0} Owners →</small>
+                </div>
+                <div
+                  className="admin-stat-card"
                   onClick={() => setView("moderation")}
                   style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
                 >
@@ -1008,14 +1071,6 @@ export function AdminDashboardExperience() {
                   <span>Awaiting review</span>
                   <strong>{pending}</strong>
                   <small>Listings to verify · Review queue →</small>
-                </div>
-                <div className="admin-stat-card">
-                  <span className="stat-icon purple">
-                    <Activity size={21} />
-                  </span>
-                  <span>Conversion rate</span>
-                  <strong>{stats?.conversionRate || 0}%</strong>
-                  <small>Closed successfully</small>
                 </div>
               </div>
 
@@ -1391,6 +1446,348 @@ export function AdminDashboardExperience() {
                   </div>
                 ) : (
                   <div className="admin-empty-mini">No leads match this filter yet.</div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* VIEW: REGISTERED USERS */}
+          {view === "users" && (
+            <>
+              <div className="admin-page-intro">
+                <div>
+                  <span className="eyebrow">ACCOUNTS &amp; VERIFIED PROFILES</span>
+                  <h1>Registered Users</h1>
+                  <p>All registered Home Seekers and Property Owners with verified contact numbers.</p>
+                </div>
+                <span className="admin-date">
+                  <UsersRound size={17} />
+                  {stats?.totalUsers || totalUsers} accounts registered
+                </span>
+              </div>
+
+              {/* Category selector pills & search */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  {[
+                    { key: "all", label: "All Users", count: stats?.totalUsers || totalUsers },
+                    { key: "customer", label: "Home Seekers", count: stats?.seekerCount || 0 },
+                    { key: "owner", label: "Owners / Rent", count: stats?.ownerCount || 0 },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setUserCategoryTab(tab.key as typeof userCategoryTab)}
+                      style={{
+                        padding: "8px 14px",
+                        borderRadius: "8px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        border: userCategoryTab === tab.key ? "1px solid var(--brand)" : "1px solid var(--border)",
+                        background: userCategoryTab === tab.key ? "var(--brand)" : "var(--surface)",
+                        color: userCategoryTab === tab.key ? "#fff" : "var(--ink)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {tab.key === "customer" && <Home size={13} />}
+                      {tab.key === "owner" && <KeyRound size={13} />}
+                      {tab.key === "all" && <UsersRound size={13} />}
+                      {tab.label}
+                      <span
+                        style={{
+                          background: userCategoryTab === tab.key ? "rgba(255,255,255,0.25)" : "var(--surface-muted)",
+                          color: userCategoryTab === tab.key ? "#fff" : "var(--muted)",
+                          padding: "1px 6px",
+                          borderRadius: "10px",
+                          fontSize: "10px",
+                        }}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ position: "relative", minWidth: "260px" }}>
+                  <Search
+                    size={15}
+                    style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }}
+                  />
+                  <input
+                    type="text"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Search by name, phone, or email..."
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px 8px 32px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                      background: "var(--surface)",
+                      fontSize: "11px",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Users Table */}
+              <div className="admin-table-card admin-full-table">
+                <div className="admin-card-title">
+                  <div>
+                    <h3>
+                      {userCategoryTab === "customer"
+                        ? "Home Seekers"
+                        : userCategoryTab === "owner"
+                        ? "Property Owners"
+                        : "All Registered Accounts"}{" "}
+                      <span className="title-count">{users.length}</span>
+                    </h3>
+                    <span>
+                      {userCategoryTab === "customer"
+                        ? "Seekers browsing and expressing interest in homes with their verified phone numbers."
+                        : userCategoryTab === "owner"
+                        ? "Owners and landlords listing properties for rent or sale with verified phone numbers."
+                        : "Direct contact numbers collected from onboarding and signup."}
+                    </span>
+                  </div>
+                </div>
+
+                {loadingUsers ? (
+                  <div className="admin-empty-mini" style={{ padding: "40px" }}>
+                    Loading user records...
+                  </div>
+                ) : users.length ? (
+                  <div style={{ overflowX: "auto" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1.8fr 1.1fr 1.4fr 1fr 1fr 100px",
+                        gap: "10px",
+                        alignItems: "center",
+                        padding: "12px 20px",
+                        borderTop: "1px solid #edf0eb",
+                        borderBottom: "1px solid #edf0eb",
+                        background: "#f9fbf8",
+                        color: "#9aa99e",
+                        fontSize: "8.5px",
+                        letterSpacing: "1px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      <span>NAME / USER</span>
+                      <span>CATEGORY</span>
+                      <span style={{ color: "var(--brand)", fontWeight: 900 }}>PHONE NUMBER</span>
+                      <span>REGISTERED</span>
+                      <span>ACTIVITY</span>
+                      <span style={{ textAlign: "right" }}>ACTIONS</span>
+                    </div>
+
+                    {users.map((u) => {
+                      const isOwner = u.roles.includes("owner");
+                      const cleanPhone = u.phone ? u.phone.replace(/[\s\-\(\)]/g, "") : null;
+                      const formattedPhone = cleanPhone
+                        ? cleanPhone.startsWith("+")
+                          ? cleanPhone
+                          : `+91 ${cleanPhone.slice(-10)}`
+                        : null;
+
+                      return (
+                        <div
+                          key={u.id}
+                          className="admin-prop-row"
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1.8fr 1.1fr 1.4fr 1fr 1fr 100px",
+                            gap: "10px",
+                            alignItems: "center",
+                            padding: "12px 20px",
+                            borderBottom: "1px solid #edf0eb",
+                            transition: "background 0.15s ease",
+                          }}
+                        >
+                          {/* Name / User */}
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                            <div
+                              style={{
+                                width: "34px",
+                                height: "34px",
+                                borderRadius: "50%",
+                                background: isOwner ? "#fff0dc" : "#e0f2fe",
+                                color: isOwner ? "#b47740" : "#0369a1",
+                                display: "grid",
+                                placeItems: "center",
+                                fontWeight: 800,
+                                fontSize: "12px",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {u.name?.charAt(0).toUpperCase() || (isOwner ? "O" : "S")}
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                              <strong style={{ fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {u.name || (isOwner ? "Unnamed Owner" : "Unnamed Seeker")}
+                              </strong>
+                              <small style={{ fontSize: "9px", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {u.email || "No email"}
+                              </small>
+                            </div>
+                          </div>
+
+                          {/* Category Badge */}
+                          <div>
+                            {isOwner ? (
+                              <span
+                                className="status-pill"
+                                style={{
+                                  background: "#fff0dc",
+                                  color: "#92400e",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontWeight: 700,
+                                  fontSize: "9.5px",
+                                }}
+                              >
+                                <KeyRound size={11} /> Owner / Rent
+                              </span>
+                            ) : (
+                              <span
+                                className="status-pill"
+                                style={{
+                                  background: "#e0f2fe",
+                                  color: "#0369a1",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontWeight: 700,
+                                  fontSize: "9.5px",
+                                }}
+                              >
+                                <Home size={11} /> Home Seeker
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Phone Number Column */}
+                          <div>
+                            {formattedPhone ? (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <a
+                                  href={`tel:${formattedPhone.replace(/\s+/g, "")}`}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "5px",
+                                    fontSize: "11.5px",
+                                    fontWeight: 800,
+                                    color: "var(--brand)",
+                                    textDecoration: "none",
+                                    background: "var(--brand-pale)",
+                                    padding: "4px 8px",
+                                    borderRadius: "5px",
+                                  }}
+                                  title="Click to call"
+                                >
+                                  <Phone size={12} />
+                                  {formattedPhone}
+                                </a>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: "10px", color: "var(--muted)", fontStyle: "italic" }}>
+                                Not provided yet
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Registered Date */}
+                          <div>
+                            <span style={{ fontSize: "10.5px", color: "var(--ink-soft)" }}>
+                              {niceDate(u.createdAt)}
+                            </span>
+                            {u.consentAt && (
+                              <small style={{ display: "block", fontSize: "9px", color: "#16a34a" }}>
+                                ✓ Consent verified
+                              </small>
+                            )}
+                          </div>
+
+                          {/* Activity */}
+                          <div>
+                            {isOwner ? (
+                              <span style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink)" }}>
+                                {u.listingsCount} {u.listingsCount === 1 ? "listing" : "listings"}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink)" }}>
+                                {u.inquiriesCount} {u.inquiriesCount === 1 ? "inquiry" : "inquiries"}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div style={{ textAlign: "right", display: "flex", justifyContent: "flex-end", gap: "5px" }}>
+                            {formattedPhone && (
+                              <a
+                                href={`tel:${formattedPhone.replace(/\s+/g, "")}`}
+                                style={{
+                                  background: "var(--brand-pale)",
+                                  color: "var(--brand)",
+                                  padding: "5px 7px",
+                                  borderRadius: "5px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "3px",
+                                  fontSize: "10px",
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                }}
+                                title="Call user"
+                              >
+                                <Phone size={11} /> Call
+                              </a>
+                            )}
+                            {u.email && (
+                              <a
+                                href={`mailto:${u.email}`}
+                                style={{
+                                  background: "var(--surface-muted)",
+                                  color: "var(--ink-soft)",
+                                  padding: "5px 7px",
+                                  borderRadius: "5px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "3px",
+                                  fontSize: "10px",
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                }}
+                                title="Email user"
+                              >
+                                <Mail size={11} /> Email
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="admin-empty-mini" style={{ padding: "40px" }}>
+                    No users found matching this category or search filter.
+                  </div>
                 )}
               </div>
             </>

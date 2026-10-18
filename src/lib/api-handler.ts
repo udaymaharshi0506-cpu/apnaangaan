@@ -5,7 +5,7 @@ import { findProperties, getProperty } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
 import { serializeAdminLead, serializeCustomerLead, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
 import { compare } from "bcryptjs";
-import { and, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -491,10 +491,51 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   if (route === "profile" && method === "GET") return respond({ user: publicSelf(await requireUser(request)) });
   if (route === "profile" && method === "PATCH") {
     const user = await requireUser(request);
-    const input = await body(request, z.object({ name: z.string().trim().min(2).max(150).optional(), email: z.union([z.email(), z.literal("")]).optional(), addOwnerRole: z.boolean().optional(), consent: z.boolean().optional() }));
-    const roles: Array<"customer" | "owner" | "admin"> = input.addOwnerRole && !user.roles.includes("owner") ? [...user.roles, "owner"] : user.roles;
+    const input = await body(request, z.object({
+      name: z.string().trim().min(2).max(150).optional(),
+      phone: z.string().trim().min(10, "Phone number must be at least 10 digits").max(20).optional(),
+      email: z.union([z.email(), z.literal("")]).optional(),
+      role: z.enum(["customer", "owner"]).optional(),
+      addOwnerRole: z.boolean().optional(),
+      consent: z.boolean().optional(),
+    }));
+
+    let cleanPhone: string | undefined = undefined;
+    if (input.phone) {
+      cleanPhone = input.phone.replace(/[\s\-\(\)]/g, "");
+      if (cleanPhone.length < 10) {
+        fail(422, "Please enter a valid 10-digit phone number.");
+      }
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.phone, cleanPhone), sql`${users.id} != ${user.id}`))
+        .limit(1);
+      if (existing) {
+        fail(409, "This phone number is already registered with another account.");
+      }
+    }
+
+    const isOwner = input.role === "owner" || !!input.addOwnerRole;
+    let roles: Array<"customer" | "owner" | "admin"> = user.roles;
+    if (isOwner && !roles.includes("owner")) {
+      roles = [...roles, "owner"];
+    } else if (input.role === "customer" && !roles.includes("admin")) {
+      roles = ["customer"];
+    }
+
     if (input.consent === false) fail(422, "Consent is required to use your account. You may delete your account instead.");
-    const [updated] = await db.update(users).set({ ...(input.name ? { name: input.name } : {}), ...(input.email !== undefined ? { email: input.email || null } : {}), roles, role: roles.includes("owner") && user.role !== "admin" ? "owner" : user.role, ...(input.consent ? { consentAt: new Date() } : {}), updatedAt: new Date() }).where(eq(users.id, user.id)).returning();
+
+    const [updated] = await db.update(users).set({
+      ...(input.name ? { name: input.name } : {}),
+      ...(cleanPhone ? { phone: cleanPhone } : {}),
+      ...(input.email !== undefined ? { email: input.email || null } : {}),
+      roles,
+      role: roles.includes("owner") && user.role !== "admin" ? "owner" : (input.role === "customer" && user.role !== "admin" ? "customer" : user.role),
+      ...(input.consent ? { consentAt: new Date() } : {}),
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id)).returning();
+
     return respond({ user: publicSelf(updated) });
   }
   if (route === "profile" && method === "DELETE") {
@@ -795,20 +836,110 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       return respond({ message: "Listing permanently deleted by admin." });
     }
 
+    if (route === "admin/users" && method === "GET") {
+      const roleFilter = params.get("role");
+      const q = params.get("q")?.trim();
+      const page = pageFrom(request);
+      const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
+
+      const conditions: any[] = [];
+      if (roleFilter === "owner") {
+        conditions.push(sql`${users.roles}::jsonb ? 'owner'`);
+      } else if (roleFilter === "customer" || roleFilter === "seeker") {
+        conditions.push(and(eq(users.role, "customer"), sql`NOT (${users.roles}::jsonb ? 'owner')`));
+      }
+
+      if (q) {
+        conditions.push(or(
+          ilike(users.name, `%${q}%`),
+          ilike(users.email, `%${q}%`),
+          ilike(users.phone, `%${q}%`)
+        ));
+      }
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [userRows, [{ total }]] = await Promise.all([
+        db
+          .select({
+            id: users.id,
+            name: users.name,
+            phone: users.phone,
+            email: users.email,
+            role: users.role,
+            roles: users.roles,
+            consentAt: users.consentAt,
+            createdAt: users.createdAt,
+            updatedAt: users.updatedAt,
+          })
+          .from(users)
+          .where(where)
+          .orderBy(desc(users.createdAt))
+          .limit(limit)
+          .offset((page - 1) * limit),
+        db.select({ total: count() }).from(users).where(where),
+      ]);
+
+      const userIds = userRows.map((u) => u.id);
+      const propCounts: Record<string, number> = {};
+      const leadCounts: Record<string, number> = {};
+
+      if (userIds.length > 0) {
+        const [props, custLeads] = await Promise.all([
+          db
+            .select({ ownerId: properties.ownerId, total: count() })
+            .from(properties)
+            .where(inArray(properties.ownerId, userIds))
+            .groupBy(properties.ownerId),
+          db
+            .select({ customerId: leads.customerId, total: count() })
+            .from(leads)
+            .where(inArray(leads.customerId, userIds))
+            .groupBy(leads.customerId),
+        ]);
+        props.forEach((p) => { propCounts[p.ownerId] = p.total; });
+        custLeads.forEach((l) => { leadCounts[l.customerId] = l.total; });
+      }
+
+      const items = userRows.map((u) => ({
+        ...u,
+        category: u.roles.includes("owner") ? "owner" : "customer",
+        categoryLabel: u.roles.includes("owner") ? "Owner / Rent" : "Home Seeker",
+        listingsCount: propCounts[u.id] || 0,
+        inquiriesCount: leadCounts[u.id] || 0,
+      }));
+
+      return respond({ items, total, page, pages: Math.ceil(total / limit) });
+    }
+
     if (route === "admin/dashboard/stats" && method === "GET") {
-      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], recent] = await Promise.all([
+      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], [{ totalUsers }], [{ totalOwners }], recent] = await Promise.all([
         db.select({ category: properties.category, total: count() }).from(properties).where(eq(properties.status, "live")).groupBy(properties.category),
         db.select({ status: leads.status, total: count() }).from(leads).groupBy(leads.status),
         db.select({ total: count() }).from(leads),
         db.select({ pending: count() }).from(properties).where(eq(properties.status, "pending_review")),
         db.select({ totalAll: count() }).from(properties),
+        db.select({ totalUsers: count() }).from(users),
+        db.select({ totalOwners: count() }).from(users).where(sql`${users.roles}::jsonb ? 'owner'`),
         db.select({ createdAt: leads.createdAt }).from(leads).where(gte(leads.createdAt, new Date(Date.now() - 7 * 86400000))),
       ]);
+      const seekerCount = Math.max(0, totalUsers - totalOwners);
       const byDay = Array.from({ length: 7 }, (_, i) => {
         const day = new Date(Date.now() - (6 - i) * 86400000).toISOString().slice(0, 10);
         return { day, total: recent.filter((row) => row.createdAt.toISOString().slice(0, 10) === day).length };
       });
-      return respond({ listingsByCategory: listingCounts, leadsByStatus: statusCounts, inquiryTotal, pendingListings: pending, totalListings, inquiriesByDay: byDay, conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0 });
+      return respond({
+        listingsByCategory: listingCounts,
+        leadsByStatus: statusCounts,
+        inquiryTotal,
+        pendingListings: pending,
+        totalListings,
+        totalUsers,
+        seekerCount,
+        ownerCount: totalOwners,
+        inquiriesByDay: byDay,
+        conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0,
+      });
     }
   }
   throw new HttpError(404, "Endpoint not found.");
