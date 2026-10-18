@@ -53,13 +53,13 @@ async function sendNotification(userId: string, type: string, message: string, l
 }
 
 const phoneSchema = z.object({ phone: z.string().regex(/^\+91[6-9]\d{9}$/, "Enter a valid Indian mobile number.") });
-const propertyInput = z.object({
+const propertyRawFields = {
   category: z.enum(["buy_home", "rent_home", "rent_pg", "rent_commercial"]),
   propertyType: z.string().trim().min(1).max(60),
   title: z.string().trim().min(3, "Title must be at least 3 characters.").max(180),
   description: z.string().trim().min(5, "Description must be at least 5 characters.").max(5000),
   price: z.coerce.number().int().positive("Price must be a positive number.").max(100000000000),
-  priceType: z.enum(["fixed", "negotiable"]).default("fixed"),
+  priceType: z.enum(["fixed", "negotiable"]),
   address: z.string().trim().min(2, "Address must be at least 2 characters.").max(300),
   city: z.string().trim().min(2).max(100),
   locality: z.string().trim().min(2).max(120),
@@ -67,13 +67,21 @@ const propertyInput = z.object({
   longitude: z.coerce.number().min(-180).max(180).nullable().optional(),
   bhkOrRoomType: z.string().trim().min(1).max(50),
   areaSqft: z.coerce.number().int().positive("Area must be positive.").max(10000000),
-  bathrooms: z.coerce.number().int().min(0).max(100).default(1),
-  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).default("Unfurnished"),
-  amenities: z.array(z.string().trim().min(1).max(60)).max(50).default([]),
+  bathrooms: z.coerce.number().int().min(0).max(100),
+  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]),
+  amenities: z.array(z.string().trim().min(1).max(60)).max(50),
   images: z.array(z.string().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide at least one photo.").max(25),
   availabilityDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
   reraNumber: z.string().trim().max(100).nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
   deposit: z.coerce.number().int().nonnegative().nullable().optional(),
+};
+
+const propertyInput = z.object({
+  ...propertyRawFields,
+  priceType: propertyRawFields.priceType.default("fixed"),
+  bathrooms: propertyRawFields.bathrooms.default(1),
+  furnishingStatus: propertyRawFields.furnishingStatus.default("Unfurnished"),
+  amenities: propertyRawFields.amenities.default([]),
 }).superRefine((data, context) => {
   const allowed: Record<string, string[]> = {
     buy_home: ["Apartment", "Independent house", "Villa", "Plot"],
@@ -86,6 +94,11 @@ const propertyInput = z.object({
     context.addIssue({ code: "custom", path: ["propertyType"], message: `Property type "${data.propertyType}" does not match ${data.category}. Allowed: ${list.join(", ")}` });
   }
 });
+
+const propertyPatchSchema = z.object({
+  ...propertyRawFields,
+  status: z.enum(["paused", "sold", "rented", "live"]),
+}).partial();
 
 function rejectContactDetails(input: Record<string, unknown>) {
   for (const field of ["title", "description", "address", "city", "locality"]) {
@@ -357,14 +370,14 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   if (segments[0] === "properties" && segments.length === 2 && ["PATCH", "DELETE"].includes(method)) {
     const user = await requireRole(request, "owner");
     const [existing] = await db.select().from(properties).where(eq(properties.id, validId(segments[1]))).limit(1);
-    if (!existing || existing.ownerId !== user.id) fail(404, "Listing not found.");
+    if (!existing || (existing.ownerId !== user.id && !hasRole(user, "admin"))) fail(404, "Listing not found.");
     if (method === "DELETE") {
-      await db.update(properties).set({ status: "paused", updatedAt: new Date() }).where(eq(properties.id, existing.id));
-      return respond({ message: "Listing removed from public search and retained for your records." });
+      await db.delete(properties).where(eq(properties.id, existing.id));
+      return respond({ message: "Listing permanently deleted." });
     }
-    const input = await body(request, propertyInput.partial().extend({ status: z.enum(["paused", "sold", "rented", "live"]).optional() }));
+    const input = await body(request, propertyPatchSchema);
     rejectContactDetails(input);
-    if (input.status && Object.keys(input).length === 1) {
+    if (input.status) {
       if (input.status === "live" && !existing.verified) fail(422, "Only verified listings can be made live.");
       const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
       return respond({ property: serializePublicProperty(updated), status: updated.status });
