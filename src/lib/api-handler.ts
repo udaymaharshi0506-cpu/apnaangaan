@@ -5,7 +5,7 @@ import { findProperties, getProperty } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
 import { serializeAdminLead, serializeCustomerLead, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
 import { compare } from "bcryptjs";
-import { and, count, desc, eq, gte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -303,6 +303,10 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   }
   if (route === "auth/me" && method === "GET") {
     const user = await getAuthUser(request);
+    if (!user) {
+      const refreshed = await rotateSession(request);
+      if (refreshed) return refreshed;
+    }
     return respond({ user: user ? publicSelf(user) : null });
   }
   if (route === "auth/refresh" && method === "POST") return (await rotateSession(request)) || respond({ error: "Session expired. Please sign in again." }, 401);
@@ -712,34 +716,99 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       return respond({ meeting: serializePublicMeeting(meeting) });
     }
     if (route === "admin/properties" && method === "GET") {
-      const status = params.get("status") || "pending_review";
+      const status = params.get("status");
+      const category = params.get("category");
+      const q = params.get("q")?.trim();
       const page = pageFrom(request);
-      const where = ["pending_review", "live", "paused", "rejected", "sold", "rented"].includes(status) ? eq(properties.status, status as Property["status"]) : undefined;
-      const [items, [{ total }]] = await Promise.all([db.select().from(properties).where(where).orderBy(desc(properties.createdAt)).limit(20).offset((page - 1) * 20), db.select({ total: count() }).from(properties).where(where)]);
-      return respond({ items: items.map((item) => ({ ...serializePublicProperty(item), status: item.status, views: item.views })), total, page, pages: Math.ceil(total / 20) });
+      const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
+
+      const conditions: any[] = [];
+      if (status && status !== "all" && ["pending_review", "live", "paused", "rejected", "sold", "rented"].includes(status)) {
+        conditions.push(eq(properties.status, status as Property["status"]));
+      }
+      if (category && ["buy_home", "rent_home", "rent_pg", "rent_commercial"].includes(category)) {
+        conditions.push(eq(properties.category, category as Property["category"]));
+      }
+      if (q) {
+        conditions.push(or(
+          ilike(properties.title, `%${q}%`),
+          ilike(properties.city, `%${q}%`),
+          ilike(properties.locality, `%${q}%`),
+          ilike(properties.address, `%${q}%`)
+        ));
+      }
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const [items, [{ total }]] = await Promise.all([
+        db
+          .select({
+            property: properties,
+            owner: {
+              id: users.id,
+              name: users.name,
+              phone: users.phone,
+              email: users.email,
+            },
+          })
+          .from(properties)
+          .leftJoin(users, eq(properties.ownerId, users.id))
+          .where(where)
+          .orderBy(desc(properties.createdAt))
+          .limit(limit)
+          .offset((page - 1) * limit),
+        db.select({ total: count() }).from(properties).where(where),
+      ]);
+
+      return respond({
+        items: items.map(({ property, owner }) => ({
+          ...serializePublicProperty(property),
+          status: property.status,
+          views: property.views,
+          owner: owner?.id ? owner : null,
+        })),
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+      });
     }
+
     if (segments[1] === "properties" && segments.length === 4 && segments[3] === "verify" && method === "PATCH") {
       const id = validId(segments[2]);
-      const { action } = await body(request, z.object({ action: z.enum(["approve", "reject", "flag"]) }));
-      const nextStatus = action === "approve" ? "live" : action === "reject" ? "rejected" : "pending_review";
-      const [property] = await db.update(properties).set({ status: nextStatus, verified: action === "approve", updatedAt: new Date() }).where(eq(properties.id, id)).returning();
+      const { action } = await body(request, z.object({ action: z.enum(["approve", "reject", "flag", "pause", "live"]) }));
+      const nextStatus = (action === "approve" || action === "live") ? "live" : action === "pause" ? "paused" : action === "reject" ? "rejected" : "pending_review";
+      const verified = (action === "approve" || action === "live") ? true : action === "reject" ? false : undefined;
+      const [property] = await db.update(properties).set({
+        status: nextStatus,
+        ...(verified !== undefined ? { verified } : {}),
+        updatedAt: new Date(),
+      }).where(eq(properties.id, id)).returning();
       if (!property) fail(404, "Listing not found.");
-      await sendNotification(property.ownerId, "listing", `Your listing ${property.title} has been ${action === "approve" ? "verified and is now live" : action === "reject" ? "not approved" : "flagged for further review"}.`, "/owner");
+      await sendNotification(property.ownerId, "listing", `Your listing "${property.title}" status has been updated to ${nextStatus}.`, "/owner");
       return respond({ status: property.status, verified: property.verified });
     }
+
+    if (segments[1] === "properties" && segments.length === 3 && method === "DELETE") {
+      const id = validId(segments[2]);
+      const [existing] = await db.select().from(properties).where(eq(properties.id, id)).limit(1);
+      if (!existing) fail(404, "Listing not found.");
+      await db.delete(properties).where(eq(properties.id, id));
+      return respond({ message: "Listing permanently deleted by admin." });
+    }
+
     if (route === "admin/dashboard/stats" && method === "GET") {
-      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], recent] = await Promise.all([
+      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], recent] = await Promise.all([
         db.select({ category: properties.category, total: count() }).from(properties).where(eq(properties.status, "live")).groupBy(properties.category),
         db.select({ status: leads.status, total: count() }).from(leads).groupBy(leads.status),
         db.select({ total: count() }).from(leads),
         db.select({ pending: count() }).from(properties).where(eq(properties.status, "pending_review")),
+        db.select({ totalAll: count() }).from(properties),
         db.select({ createdAt: leads.createdAt }).from(leads).where(gte(leads.createdAt, new Date(Date.now() - 7 * 86400000))),
       ]);
       const byDay = Array.from({ length: 7 }, (_, i) => {
         const day = new Date(Date.now() - (6 - i) * 86400000).toISOString().slice(0, 10);
         return { day, total: recent.filter((row) => row.createdAt.toISOString().slice(0, 10) === day).length };
       });
-      return respond({ listingsByCategory: listingCounts, leadsByStatus: statusCounts, inquiryTotal, pendingListings: pending, inquiriesByDay: byDay, conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0 });
+      return respond({ listingsByCategory: listingCounts, leadsByStatus: statusCounts, inquiryTotal, pendingListings: pending, totalListings, inquiriesByDay: byDay, conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0 });
     }
   }
   throw new HttpError(404, "Endpoint not found.");

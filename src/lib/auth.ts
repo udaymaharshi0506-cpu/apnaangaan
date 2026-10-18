@@ -102,9 +102,9 @@ export async function clearSession(request: Request, response: NextResponse) {
       if (payload.jti) await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.id, payload.jti));
     } catch { /* Expired cookie can still be cleared. */ }
   }
-  response.cookies.delete(ACCESS_COOKIE);
-  response.cookies.delete(REFRESH_COOKIE);
-  response.cookies.delete(ADMIN_CHALLENGE_COOKIE);
+  response.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
+  response.cookies.set(REFRESH_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
+  response.cookies.set(ADMIN_CHALLENGE_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
   return response;
 }
 

@@ -7,11 +7,35 @@ import { CheckCircle2, Info, X } from "lucide-react";
 export type SessionUser = { id: string; phone: string | null; email: string | null; name: string | null; role: string; roles: Array<"customer" | "owner" | "admin">; consentAt: string | null; needsOnboarding: boolean };
 
 export async function apiFetch<T = Record<string, unknown>>(url: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const response = await fetch(url, { ...options, credentials: "same-origin", headers: { ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}), ...options.headers }, cache: "no-store" });
-  if (response.status === 401 && retry && !url.includes("/auth/") && !url.includes("/admin/login") && !url.includes("/admin/2fa")) {
-    const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" });
-    if (refreshed.ok) return apiFetch<T>(url, options, false);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      credentials: "same-origin",
+      headers: {
+        ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+      cache: "no-store",
+    });
+  } catch {
+    if (retry) {
+      await new Promise((r) => setTimeout(r, 250));
+      return apiFetch<T>(url, options, false);
+    }
+    throw new Error("Connection failed. Please check your network and try again.");
   }
+
+  if (response.status === 401 && retry && !url.includes("/auth/") && !url.includes("/admin/login") && !url.includes("/admin/2fa")) {
+    const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" }).catch(() => null);
+    if (refreshed?.ok) return apiFetch<T>(url, options, false);
+  }
+
+  if ([502, 503, 504].includes(response.status) && retry) {
+    await new Promise((r) => setTimeout(r, 300));
+    return apiFetch<T>(url, options, false);
+  }
+
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Something went wrong. Please try again.");
   return data as T;

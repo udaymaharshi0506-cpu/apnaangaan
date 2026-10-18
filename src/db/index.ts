@@ -29,17 +29,16 @@ export const pool =
   new Pool({
     connectionString: cleanDatabaseUrl,
     ssl: isHostedPg ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 15000,
-    idleTimeoutMillis: 10000,
-    max: 10,
+    connectionTimeoutMillis: 6000,
+    idleTimeoutMillis: 3000,
+    max: isHostedPg ? 3 : 10,
   });
 
 pool.on("error", (err) => {
   console.error("Unexpected error on idle PostgreSQL client:", err);
 });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
-}
+// Cache pool on globalThis in all environments so warm serverless lambdas reuse connections
+globalForDb.__arenaNextJsPostgresqlPool = pool;
 
 export const db = drizzle(pool);
