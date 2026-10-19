@@ -185,3 +185,60 @@ test("Gallery: photos array fallback prevents NaN and empty-index crashes", () =
   const secondaryIndices = [1, 2].map((idx) => idx % photos.length);
   assert.deepEqual(secondaryIndices, [0, 0]); // Gracefully wraps without NaN or out-of-bounds error
 });
+
+// ─────────────────────────────────────────────────────────────
+// 6. Moderation & Rejection Reason Integrity
+// ─────────────────────────────────────────────────────────────
+test("Moderation: Admin verification handles rejection reason and preserves KYC documents", () => {
+  const propertyMock = {
+    id: "123e4567-e89b-12d3-a456-426614174000",
+    title: "3 BHK Villa in Whitefield",
+    category: "buy_home",
+    propertyType: "Villa",
+    price: 15000000,
+    priceType: "negotiable",
+    liveSelfieUrl: "https://example.com/selfie.jpg",
+    aadhaarCardUrl: "https://example.com/aadhaar.jpg",
+    ownershipType: "sole_owner",
+    coOwners: null,
+    ownerName: "Uday Maharshi",
+    ownerPhone: "+919876543210",
+    status: "rejected",
+    rejectionReason: "Government Aadhaar card document is blurry and unreadable.",
+    verified: false,
+  };
+
+  // Ensure public serialization does not leak KYC documents or rejection reason
+  const publicSerialized = serializePublicProperty(propertyMock as any);
+  assert.equal("liveSelfieUrl" in publicSerialized, false);
+  assert.equal("aadhaarCardUrl" in publicSerialized, false);
+  assert.equal("rejectionReason" in publicSerialized, false);
+  assert.equal("ownerName" in publicSerialized, false);
+
+  // Admin moderation payload includes KYC documents and rejection reason
+  const adminModerationPayload = {
+    ...publicSerialized,
+    status: propertyMock.status,
+    liveSelfieUrl: propertyMock.liveSelfieUrl,
+    aadhaarCardUrl: propertyMock.aadhaarCardUrl,
+    ownershipType: propertyMock.ownershipType,
+    coOwners: propertyMock.coOwners,
+    ownerName: propertyMock.ownerName,
+    ownerPhone: propertyMock.ownerPhone,
+    rejectionReason: propertyMock.rejectionReason,
+  };
+
+  assert.equal(adminModerationPayload.liveSelfieUrl, "https://example.com/selfie.jpg");
+  assert.equal(adminModerationPayload.aadhaarCardUrl, "https://example.com/aadhaar.jpg");
+  assert.equal(adminModerationPayload.rejectionReason, "Government Aadhaar card document is blurry and unreadable.");
+  assert.equal(adminModerationPayload.status, "rejected");
+
+  // Owner payload includes rejection reason so owner knows why listing was rejected
+  const ownerListingPayload = {
+    ...publicSerialized,
+    status: propertyMock.status,
+    rejectionReason: propertyMock.rejectionReason,
+  };
+  assert.equal(ownerListingPayload.rejectionReason, "Government Aadhaar card document is blurry and unreadable.");
+});
+

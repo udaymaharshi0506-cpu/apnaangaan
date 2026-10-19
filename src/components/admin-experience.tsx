@@ -5,20 +5,27 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Activity,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  BadgeAlert,
   BadgeCheck,
   Building2,
   CalendarDays,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  ExternalLink,
   Eye,
+  FileCheck2,
+  FileText,
   Heart,
   Home,
+  Info,
   KeyRound,
   LayoutDashboard,
   LockKeyhole,
@@ -28,11 +35,15 @@ import {
   MessageSquare,
   Phone,
   Search,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
+  UserCheck,
   UsersRound,
   X,
+  ZoomIn,
 } from "lucide-react";
 import { Brand } from "@/components/site-shell";
 import { apiFetch, useApp } from "@/components/providers";
@@ -74,6 +85,13 @@ export type AdminLead = {
 export type ModeratedProperty = PublicProperty & {
   status: string;
   views: number;
+  liveSelfieUrl?: string | null;
+  aadhaarCardUrl?: string | null;
+  ownershipType?: string | null;
+  coOwners?: string | null;
+  ownerName?: string | null;
+  ownerPhone?: string | null;
+  rejectionReason?: string | null;
   owner?: { id: string; name: string | null; phone: string | null; email: string | null } | null;
 };
 
@@ -266,6 +284,303 @@ export function AdminLoginExperience() {
   );
 }
 
+export function DocumentLightboxModal({
+  title,
+  imageUrl,
+  onClose,
+}: {
+  title: string;
+  imageUrl: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="lead-panel-backdrop"
+      onClick={onClose}
+      style={{
+        zIndex: 400,
+        background: "rgba(10, 18, 14, 0.88)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(96vw, 920px)",
+          maxHeight: "92vh",
+          display: "flex",
+          flexDirection: "column",
+          background: "#18181b",
+          borderRadius: "14px",
+          overflow: "hidden",
+          boxShadow: "0 25px 60px rgba(0, 0, 0, 0.6)",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            background: "#27272a",
+            color: "#ffffff",
+            borderBottom: "1px solid #3f3f46",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <FileText size={16} color="#38bdf8" />
+            <strong style={{ fontSize: "13px", letterSpacing: "-0.2px" }}>{title}</strong>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <a
+              href={imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                fontSize: "11px",
+                color: "#93c5fd",
+                textDecoration: "none",
+                fontWeight: 600,
+              }}
+            >
+              Open Original <ExternalLink size={12} />
+            </a>
+            <button
+              onClick={onClose}
+              aria-label="Close image preview"
+              style={{ background: "none", border: "none", color: "#a1a1aa", cursor: "pointer", display: "grid", placeItems: "center" }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+        <div
+          style={{
+            padding: "18px",
+            overflow: "auto",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "#09090b",
+            minHeight: "320px",
+          }}
+        >
+          <img
+            src={imageUrl}
+            alt={title}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "75vh",
+              objectFit: "contain",
+              borderRadius: "8px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function RejectReasonModal({
+  propertyTitle,
+  ownerName,
+  onConfirm,
+  onClose,
+  busy,
+}: {
+  propertyTitle: string;
+  ownerName?: string | null;
+  onConfirm: (reason: string) => Promise<void>;
+  onClose: () => void;
+  busy?: boolean;
+}) {
+  const [reason, setReason] = useState("");
+  const presets = [
+    "Government Aadhaar card document is blurry, incomplete, or unreadable.",
+    "Live selfie verification photo is blurry or does not match the Aadhaar document.",
+    "Ownership proof or co-owner consent is missing or invalid.",
+    "Property photos are low-resolution, watermarked, or downloaded from the web.",
+    "Owner phone number / email provided in description (violates platform privacy).",
+    "Street address, landmark, or location pin is inaccurate or unlocatable.",
+    "Asking price, maintenance, or security deposit details seem unrealistic or contradictory.",
+    "Mandatory RERA number or legal disclosure is required for this commercial/project listing.",
+  ];
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!reason.trim()) return;
+    await onConfirm(reason.trim());
+  }
+
+  return (
+    <div
+      className="lead-panel-backdrop"
+      onClick={onClose}
+      style={{
+        zIndex: 350,
+        background: "rgba(10, 20, 15, 0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(100%, 550px)",
+          background: "#ffffff",
+          borderRadius: "14px",
+          boxShadow: "0 25px 60px rgba(0, 0, 0, 0.3)",
+          border: "1px solid #fee2e2",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            background: "#fef2f2",
+            padding: "18px 22px",
+            borderBottom: "1px solid #fecaca",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "10px",
+                background: "#fee2e2",
+                color: "#dc2626",
+                display: "grid",
+                placeItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <AlertTriangle size={20} />
+            </span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "16px", color: "#991b1b", fontWeight: 700 }}>Reject Property Listing</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#b91c1c" }}>
+                This rejection reason will be displayed directly on the owner&apos;s dashboard.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close reject modal"
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#991b1b" }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: "20px 22px" }}>
+          <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "16px" }}>
+            <div style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: 700, color: "#64748b" }}>Target Property</div>
+            <strong style={{ fontSize: "13px", color: "#0f172a", display: "block", marginTop: "2px" }}>{propertyTitle}</strong>
+            {ownerName && <span style={{ fontSize: "11px", color: "#64748b" }}>Owner: {ownerName}</span>}
+          </div>
+
+          <div style={{ marginBottom: "14px" }}>
+            <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
+              Quick Select Common Reasons:
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", maxHeight: "130px", overflowY: "auto", padding: "2px" }}>
+              {presets.map((preset, idx) => (
+                <button
+                  type="button"
+                  key={idx}
+                  onClick={() => setReason(preset)}
+                  style={{
+                    background: reason === preset ? "#fee2e2" : "#f1f5f9",
+                    color: reason === preset ? "#991b1b" : "#475569",
+                    border: reason === preset ? "1px solid #f87171" : "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "5px 9px",
+                    fontSize: "11px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    transition: "all 0.1s ease",
+                  }}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: "18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
+              <span>Formal Rejection Feedback (Owner Visible) *</span>
+              <span style={{ color: "#94a3b8", fontWeight: 400 }}>{reason.length}/1000</span>
+            </div>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Explain specifically what needs to be corrected so the owner knows exactly why the property was rejected and what to fix..."
+              required
+              rows={4}
+              maxLength={1000}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                fontSize: "12.5px",
+                lineHeight: "1.5",
+                fontFamily: "inherit",
+                color: "#0f172a",
+                resize: "vertical",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="btn btn-outline"
+              style={{ padding: "8px 16px", fontSize: "12px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !reason.trim()}
+              className="btn btn-primary"
+              style={{
+                background: "#dc2626",
+                borderColor: "#dc2626",
+                color: "#ffffff",
+                padding: "8px 18px",
+                fontSize: "12px",
+                fontWeight: 600,
+              }}
+            >
+              {busy ? "Rejecting..." : "Confirm & Reject Listing"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function PropertyDetailModal({
   property,
   onClose,
@@ -278,15 +593,19 @@ export function PropertyDetailModal({
   const { toast } = useApp();
   const [activePhoto, setActivePhoto] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<{ title: string; url: string } | null>(null);
 
   const images = property.images && property.images.length > 0 ? property.images : [];
+  const ownerDisplayName = property.ownerName || property.owner?.name || "Registered User";
+  const ownerDisplayPhone = property.ownerPhone || property.owner?.phone;
 
-  async function handleAction(action: "approve" | "reject" | "flag" | "pause" | "live") {
+  async function handleAction(action: "approve" | "reject" | "flag" | "pause" | "live", reason?: string) {
     setBusy(true);
     try {
       await apiFetch(`/api/admin/properties/${property.id}/verify`, {
         method: "PATCH",
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, reason }),
       });
       toast(`Listing status updated: ${action === "approve" ? "approved & verified" : action}`);
       await onRefresh();
@@ -314,269 +633,860 @@ export function PropertyDetailModal({
   }
 
   return (
-    <div className="lead-panel-backdrop" onClick={onClose}>
-      <aside className="lead-panel admin-prop-panel" onClick={(e) => e.stopPropagation()} style={{ width: "min(100%, 680px)" }}>
-        <div className="lead-panel-top">
-          <div>
-            <span className="eyebrow">
-              {categoryLabel[property.category] || property.category} · {property.propertyType}
-            </span>
-            <h2>{property.title}</h2>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px" }}>
-              <span className={`status-pill status-${property.status}`}>{property.status.replaceAll("_", " ")}</span>
-              {property.verified && (
-                <span className="status-pill" style={{ background: "#e0f2fe", color: "#0369a1" }}>
-                  <BadgeCheck size={13} style={{ marginRight: "3px" }} /> Verified
+    <>
+      <div className="lead-panel-backdrop" onClick={onClose}>
+        <aside
+          className="lead-panel admin-prop-panel"
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: "min(100%, 740px)", display: "flex", flexDirection: "column" }}
+        >
+          {/* Header Bar */}
+          <div className="lead-panel-top">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="eyebrow" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                {categoryLabel[property.category] || property.category} · {property.propertyType}
+              </span>
+              <h2 style={{ fontSize: "18px", margin: "4px 0 6px", lineHeight: "1.3" }}>{property.title}</h2>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <span className={`status-pill status-${property.status}`}>
+                  {property.status.replaceAll("_", " ")}
                 </span>
-              )}
-              <small style={{ color: "var(--muted)", fontSize: "11px" }}>
-                Listed {niceDate(property.createdAt)} · {property.views} views
-              </small>
-            </div>
-          </div>
-          <button onClick={onClose} aria-label="Close property detail" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
-            <X size={22} />
-          </button>
-        </div>
-
-        <div className="lead-panel-scroll">
-          {/* Photo Gallery */}
-          {images.length > 0 && (
-            <div style={{ marginBottom: "18px" }}>
-              <div style={{ width: "100%", height: "260px", borderRadius: "10px", overflow: "hidden", border: "1px solid var(--border)", background: "var(--surface-soft)" }}>
-                <img src={images[activePhoto]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {property.verified && (
+                  <span className="status-pill" style={{ background: "#e0f2fe", color: "#0369a1", fontWeight: 700 }}>
+                    <BadgeCheck size={13} style={{ marginRight: "3px" }} /> Verified
+                  </span>
+                )}
+                <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                  Listed {niceDate(property.createdAt)} · {property.views} views · ID: {property.id.slice(0, 8)}...
+                </small>
               </div>
-              {images.length > 1 && (
-                <div style={{ display: "flex", gap: "8px", marginTop: "8px", overflowX: "auto", paddingBottom: "4px" }}>
-                  {images.map((img, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setActivePhoto(idx)}
+            </div>
+            <button
+              onClick={onClose}
+              aria-label="Close property detail"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: "4px" }}
+            >
+              <X size={22} />
+            </button>
+          </div>
+
+          <div className="lead-panel-scroll">
+            {/* Rejection Feedback Alert (if rejected or previous rejection reason exists) */}
+            {(property.status === "rejected" || property.rejectionReason) && (
+              <div
+                style={{
+                  background: "#fef2f2",
+                  border: "1px solid #fca5a5",
+                  borderRadius: "10px",
+                  padding: "14px 16px",
+                  marginBottom: "18px",
+                  display: "flex",
+                  gap: "12px",
+                  alignItems: "flex-start",
+                }}
+              >
+                <span style={{ color: "#dc2626", marginTop: "2px", flexShrink: 0 }}>
+                  <ShieldAlert size={20} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ display: "block", fontSize: "13px", color: "#991b1b" }}>
+                    Listing Rejection Feedback (Owner Visible)
+                  </strong>
+                  <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#7f1d1d", lineHeight: "1.5" }}>
+                    {property.rejectionReason || "No specific reason provided."}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 1: MANDATORY OWNER IDENTITY & KYC VERIFICATION */}
+            <div
+              style={{
+                background: "#f8fafc",
+                border: "1px solid #cbd5e1",
+                borderRadius: "12px",
+                padding: "16px",
+                marginBottom: "20px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px" }}>
+                <h3 style={{ margin: 0, fontSize: "13px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <ShieldCheck size={16} color="#059669" /> 1. Owner Identity & KYC Documents
+                </h3>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: "4px",
+                    background: property.liveSelfieUrl && property.aadhaarCardUrl ? "#dcfce7" : "#fef3c7",
+                    color: property.liveSelfieUrl && property.aadhaarCardUrl ? "#15803d" : "#b45309",
+                  }}
+                >
+                  {property.liveSelfieUrl && property.aadhaarCardUrl ? "KYC Documents Provided" : "Incomplete KYC Documents"}
+                </span>
+              </div>
+
+              {/* KYC Documents Grid: Live Selfie & Aadhaar */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                {/* Live Selfie Card */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "10px",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <Camera size={13} color="#2563eb" /> Live Selfie Photo
+                    </span>
+                    {property.liveSelfieUrl ? (
+                      <span style={{ fontSize: "9px", background: "#dcfce7", color: "#166534", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "9px", background: "#fee2e2", color: "#991b1b", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                        Missing
+                      </span>
+                    )}
+                  </div>
+                  {property.liveSelfieUrl ? (
+                    <div
+                      onClick={() => setLightbox({ title: `Live Selfie: ${ownerDisplayName}`, url: property.liveSelfieUrl! })}
                       style={{
-                        width: "60px",
-                        height: "45px",
-                        borderRadius: "6px",
+                        position: "relative",
+                        width: "100%",
+                        height: "140px",
+                        borderRadius: "8px",
                         overflow: "hidden",
-                        border: idx === activePhoto ? "2px solid var(--brand)" : "1px solid var(--border)",
-                        padding: 0,
+                        background: "#f1f5f9",
                         cursor: "pointer",
-                        opacity: idx === activePhoto ? 1 : 0.65,
-                        flexShrink: 0,
+                        border: "1px solid #e2e8f0",
                       }}
                     >
-                      <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img
+                        src={property.liveSelfieUrl}
+                        alt="Owner Live Selfie"
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "rgba(0,0,0,0.35)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          opacity: 0,
+                          transition: "opacity 0.15s ease",
+                          color: "#fff",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          gap: "5px",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+                      >
+                        <ZoomIn size={16} /> Inspect Full Selfie
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        height: "140px",
+                        borderRadius: "8px",
+                        border: "1px dashed #cbd5e1",
+                        background: "#f8fafc",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      <Camera size={26} strokeWidth={1.5} />
+                      <span style={{ fontSize: "11px" }}>No live selfie submitted</span>
+                    </div>
+                  )}
+                  {property.liveSelfieUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setLightbox({ title: `Live Selfie: ${ownerDisplayName}`, url: property.liveSelfieUrl! })}
+                      style={{
+                        marginTop: "8px",
+                        background: "none",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        padding: "5px",
+                        fontSize: "10.5px",
+                        cursor: "pointer",
+                        color: "#0284c7",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <ZoomIn size={12} /> View Full Live Selfie
                     </button>
-                  ))}
+                  )}
+                </div>
+
+                {/* Aadhaar Card Document Card */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "10px",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <FileCheck2 size={13} color="#059669" /> Aadhaar Card Document
+                    </span>
+                    {property.aadhaarCardUrl ? (
+                      <span style={{ fontSize: "9px", background: "#dcfce7", color: "#166534", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "9px", background: "#fee2e2", color: "#991b1b", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                        Missing
+                      </span>
+                    )}
+                  </div>
+                  {property.aadhaarCardUrl ? (
+                    <div
+                      onClick={() => setLightbox({ title: `Aadhaar Card: ${ownerDisplayName}`, url: property.aadhaarCardUrl! })}
+                      style={{
+                        position: "relative",
+                        width: "100%",
+                        height: "140px",
+                        borderRadius: "8px",
+                        overflow: "hidden",
+                        background: "#f1f5f9",
+                        cursor: "pointer",
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <img
+                        src={property.aadhaarCardUrl}
+                        alt="Owner Aadhaar Card"
+                        style={{ width: "100%", height: "100%", objectFit: "contain", background: "#f8fafc" }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "rgba(0,0,0,0.35)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          opacity: 0,
+                          transition: "opacity 0.15s ease",
+                          color: "#fff",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          gap: "5px",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+                      >
+                        <ZoomIn size={16} /> Inspect Aadhaar Card
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        height: "140px",
+                        borderRadius: "8px",
+                        border: "1px dashed #cbd5e1",
+                        background: "#f8fafc",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      <FileCheck2 size={26} strokeWidth={1.5} />
+                      <span style={{ fontSize: "11px" }}>No Aadhaar card submitted</span>
+                    </div>
+                  )}
+                  {property.aadhaarCardUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setLightbox({ title: `Aadhaar Card: ${ownerDisplayName}`, url: property.aadhaarCardUrl! })}
+                      style={{
+                        marginTop: "8px",
+                        background: "none",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        padding: "5px",
+                        fontSize: "10.5px",
+                        cursor: "pointer",
+                        color: "#059669",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <ZoomIn size={12} /> View Full Aadhaar Card
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Ownership & Contact Details Box */}
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "12px 14px",
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "10px",
+                  fontSize: "11.5px",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "block" }}>
+                    Ownership Type
+                  </span>
+                  <strong style={{ color: "#0f172a", textTransform: "capitalize" }}>
+                    {property.ownershipType ? property.ownershipType.replace("_", " ") : "Sole Owner"}
+                  </strong>
+                  {property.coOwners && (
+                    <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px" }}>
+                      Co-owners: {property.coOwners}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <span style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "block" }}>
+                    Owner Name
+                  </span>
+                  <strong style={{ color: "#0f172a" }}>{ownerDisplayName}</strong>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "block" }}>
+                    Owner Phone
+                  </span>
+                  {ownerDisplayPhone ? (
+                    <a
+                      href={`tel:${ownerDisplayPhone}`}
+                      style={{ color: "var(--brand)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <Phone size={12} /> {ownerDisplayPhone}
+                    </a>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>Not provided</span>
+                  )}
+                </div>
+
+                <div>
+                  <span style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "block" }}>
+                    Account Email
+                  </span>
+                  {property.owner?.email ? (
+                    <a
+                      href={`mailto:${property.owner.email}`}
+                      style={{ color: "var(--brand)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px", overflowWrap: "anywhere" }}
+                    >
+                      <Mail size={12} /> {property.owner.email}
+                    </a>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>No email on file</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: FINANCIALS & PRICING */}
+            <div style={{ marginBottom: "18px" }}>
+              <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)", margin: "0 0 8px" }}>
+                2. Pricing & Financial Structure
+              </h3>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Asking Price / Rent</span>
+                  <strong style={{ display: "block", fontSize: "15px", color: "var(--ink)", marginTop: "2px" }}>
+                    {formatPrice(property.price, property.category)}
+                  </strong>
+                  <small style={{ fontSize: "10px", color: "var(--muted)" }}>Pricing: {property.priceType || "Fixed"}</small>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Security Deposit</span>
+                  <strong style={{ display: "block", fontSize: "15px", color: "var(--ink)", marginTop: "2px" }}>
+                    {property.deposit ? formatPrice(property.deposit) : "None / Negotiable"}
+                  </strong>
+                  <small style={{ fontSize: "10px", color: "var(--muted)" }}>Refundable deposit</small>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Maintenance</span>
+                  <strong style={{ display: "block", fontSize: "15px", color: "var(--ink)", marginTop: "2px" }}>
+                    {property.maintenanceStatus === "included"
+                      ? "Included"
+                      : property.maintenanceAmount
+                      ? `₹${property.maintenanceAmount.toLocaleString("en-IN")}/mo`
+                      : "Separate / NA"}
+                  </strong>
+                  <small style={{ fontSize: "10px", color: "var(--muted)" }}>Monthly maintenance charges</small>
+                </div>
+              </div>
+
+              {/* Itemized charges if provided */}
+              {property.itemizedCharges && Object.keys(property.itemizedCharges).length > 0 && (
+                <div
+                  style={{
+                    background: "var(--surface-tint)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    marginTop: "8px",
+                    fontSize: "11px",
+                  }}
+                >
+                  <strong style={{ display: "block", color: "var(--ink)", marginBottom: "4px" }}>Itemized Monthly Breakdown:</strong>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+                    {Object.entries(property.itemizedCharges).map(([k, v]) => (
+                      <span key={k} style={{ color: "var(--ink-soft)" }}>
+                        <strong>{k}:</strong> {String(v)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-          )}
 
-          {/* Key Specs Grid */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "10px",
-              marginBottom: "16px",
-            }}
-          >
-            <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
-              <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Price</span>
-              <strong style={{ display: "block", fontSize: "14px", color: "var(--ink)", marginTop: "2px" }}>
-                {formatPrice(property.price, property.category)}
-              </strong>
-              <small style={{ fontSize: "10px", color: "var(--muted)" }}>Type: {property.priceType}</small>
+            {/* SECTION 3: EXACT LOCATION & GEOLOCATION */}
+            <div className="lead-section" style={{ paddingTop: "14px" }}>
+              <h3 style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                <MapPin size={15} color="var(--brand)" /> 3. Exact Location & Address
+              </h3>
+              <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px", fontSize: "12px", lineHeight: "1.6" }}>
+                <div style={{ marginBottom: "6px" }}>
+                  <strong>Street Address:</strong> {property.address}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", color: "var(--ink-soft)" }}>
+                  <div>
+                    <strong>Landmark:</strong> {property.landmark || "Not specified"}
+                  </div>
+                  <div>
+                    <strong>PIN Code:</strong> {property.pinCode || "Not specified"}
+                  </div>
+                  <div>
+                    <strong>Locality & City:</strong> {property.locality}, {property.city}
+                  </div>
+                  <div>
+                    <strong>Map Coordinates:</strong>{" "}
+                    {property.latitude && property.longitude ? (
+                      <span>
+                        {property.latitude.toFixed(4)}, {property.longitude.toFixed(4)}
+                      </span>
+                    ) : (
+                      <span>Not pinned</span>
+                    )}
+                  </div>
+                </div>
+                {property.latitude && property.longitude && (
+                  <div style={{ marginTop: "10px" }}>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${property.latitude},${property.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "var(--brand)",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      <MapPin size={12} /> Open in Google Maps <ExternalLink size={11} />
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
-            <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
-              <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Layout / Area</span>
-              <strong style={{ display: "block", fontSize: "14px", color: "var(--ink)", marginTop: "2px" }}>
-                {property.bhkOrRoomType}
-              </strong>
-              <small style={{ fontSize: "10px", color: "var(--muted)" }}>{property.areaSqft.toLocaleString("en-IN")} sq.ft.</small>
-            </div>
-            <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
-              <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Furnishing & Bath</span>
-              <strong style={{ display: "block", fontSize: "14px", color: "var(--ink)", marginTop: "2px" }}>
-                {property.furnishingStatus}
-              </strong>
-              <small style={{ fontSize: "10px", color: "var(--muted)" }}>{property.bathrooms} Bathrooms</small>
-            </div>
-          </div>
 
-          {/* Location & Address */}
-          <div className="lead-section" style={{ paddingTop: "14px" }}>
-            <h3 style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <MapPin size={16} color="var(--brand)" /> Location & Address
-            </h3>
-            <p style={{ fontSize: "12px", lineHeight: "1.6", margin: "4px 0" }}>
-              <strong>Address:</strong> {property.address}
-            </p>
-            <p style={{ fontSize: "12px", color: "var(--muted)", margin: "4px 0" }}>
-              <strong>Locality & City:</strong> {property.locality}, {property.city}
-              {property.latitude && property.longitude && (
-                <span> · Coordinates: {property.latitude.toFixed(4)}, {property.longitude.toFixed(4)}</span>
-              )}
-            </p>
-          </div>
-
-          {/* Description */}
-          <div className="lead-section">
-            <h3>Full Description</h3>
-            <p style={{ fontSize: "12.5px", lineHeight: "1.7", color: "var(--ink)", whiteSpace: "pre-line", margin: 0 }}>
-              {property.description}
-            </p>
-          </div>
-
-          {/* Amenities */}
-          {property.amenities && property.amenities.length > 0 && (
+            {/* SECTION 4: ARCHITECTURE & LAYOUT SPECS */}
             <div className="lead-section">
-              <h3>Amenities ({property.amenities.length})</h3>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                {property.amenities.map((amenity, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      background: "var(--brand-pale)",
-                      color: "var(--brand)",
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      padding: "4px 9px",
-                      borderRadius: "6px",
-                    }}
-                  >
-                    ✓ {amenity}
-                  </span>
-                ))}
+              <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                4. Architecture & Space Specifications
+              </h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", fontSize: "11.5px" }}>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Layout / BHK</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>{property.bhkOrRoomType}</strong>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Super Built-up Area</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>{property.areaSqft.toLocaleString("en-IN")} sq.ft.</strong>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Floor / Total Floors</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>
+                    {property.floor ? `Floor ${property.floor}` : "Ground"} {property.totalFloors ? `of ${property.totalFloors}` : ""}
+                  </strong>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Facing Direction</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>{property.facing || "Not specified"}</strong>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Property Age</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>{property.propertyAge || "Not specified"}</strong>
+                </div>
+                <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 11px" }}>
+                  <span style={{ fontSize: "9px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Furnishing & Bath</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--ink)" }}>
+                    {property.furnishingStatus} · {property.bathrooms} Baths
+                  </strong>
+                </div>
               </div>
             </div>
-          )}
 
-          {/* Compliance & Financial Details */}
-          <div className="lead-section">
-            <h3>Compliance & Additional Details</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "11.5px" }}>
-              <div>
-                <strong style={{ color: "var(--muted)" }}>Security Deposit:</strong>{" "}
-                {property.deposit ? formatPrice(property.deposit) : "None / Negotiable"}
-              </div>
-              <div>
-                <strong style={{ color: "var(--muted)" }}>Availability:</strong>{" "}
-                {property.availabilityDate ? niceDate(property.availabilityDate) : "Immediate"}
-              </div>
-              <div>
-                <strong style={{ color: "var(--muted)" }}>RERA Registration:</strong>{" "}
-                {property.reraNumber ? <span style={{ color: "var(--brand)", fontWeight: 700 }}>{property.reraNumber}</span> : "Not provided"}
-              </div>
-              <div>
-                <strong style={{ color: "var(--muted)" }}>Property ID:</strong>{" "}
-                <span style={{ fontFamily: "monospace", fontSize: "10px" }}>{property.id}</span>
+            {/* SECTION 5: POSSESSION & LEGAL COMPLIANCE */}
+            <div className="lead-section">
+              <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                5. Possession & Legal Compliance
+              </h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "11.5px" }}>
+                <div>
+                  <strong style={{ color: "var(--muted)" }}>Possession Status:</strong>{" "}
+                  {property.possessionStatus || "Immediate / Ready to Move"}
+                  {property.possessionDate && <span> ({niceDate(property.possessionDate)})</span>}
+                </div>
+                <div>
+                  <strong style={{ color: "var(--muted)" }}>Loan / Mortgage:</strong>{" "}
+                  {property.loanStatus || "None / Freehold"}
+                </div>
+                <div>
+                  <strong style={{ color: "var(--muted)" }}>RERA Registration:</strong>{" "}
+                  {property.reraNumber ? (
+                    <span style={{ color: "var(--brand)", fontWeight: 700 }}>{property.reraNumber}</span>
+                  ) : (
+                    "Not provided / Non-project"
+                  )}
+                </div>
+                <div>
+                  <strong style={{ color: "var(--muted)" }}>Available From:</strong>{" "}
+                  {property.availabilityDate ? niceDate(property.availabilityDate) : "Immediate"}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Listed By / Owner Details */}
-          <div className="lead-section">
-            <h3>Property Owner / Contact</h3>
-            <div
-              style={{
-                background: "var(--surface-tint)",
-                border: "1px solid var(--border)",
-                borderRadius: "8px",
-                padding: "12px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "6px",
-              }}
-            >
-              <strong>{property.owner?.name || "Registered User"}</strong>
-              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "11px" }}>
-                {property.owner?.phone && (
-                  <a href={`tel:${property.owner.phone}`} style={{ display: "flex", alignItems: "center", gap: "5px", color: "var(--brand)", fontWeight: 700 }}>
-                    <Phone size={13} /> {property.owner.phone}
-                  </a>
+            {/* SECTION 6: RENTAL / PG TERMS (if applicable) */}
+            {(property.category === "rent_home" || property.category === "rent_pg" || property.lockInPeriod || property.noticePeriod || property.tenantPreference) && (
+              <div className="lead-section">
+                <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                  6. Rental & PG Policies
+                </h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", fontSize: "11px", marginBottom: "8px" }}>
+                  {property.lockInPeriod && (
+                    <div>
+                      <strong style={{ color: "var(--muted)" }}>Lock-in:</strong> {property.lockInPeriod}
+                    </div>
+                  )}
+                  {property.noticePeriod && (
+                    <div>
+                      <strong style={{ color: "var(--muted)" }}>Notice Period:</strong> {property.noticePeriod}
+                    </div>
+                  )}
+                  {property.tenantPreference && (
+                    <div>
+                      <strong style={{ color: "var(--muted)" }}>Preference:</strong> {property.tenantPreference}
+                    </div>
+                  )}
+                  {property.bedCount && (
+                    <div>
+                      <strong style={{ color: "var(--muted)" }}>Bed Count:</strong> {property.bedCount}
+                    </div>
+                  )}
+                  {property.genderPolicy && (
+                    <div>
+                      <strong style={{ color: "var(--muted)" }}>Gender Policy:</strong> {property.genderPolicy}
+                    </div>
+                  )}
+                </div>
+                {property.houseRules && property.houseRules.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+                    {property.houseRules.map((rule, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          background: "var(--surface-tint)",
+                          border: "1px solid var(--border)",
+                          borderRadius: "4px",
+                          padding: "2px 8px",
+                          fontSize: "10.5px",
+                          color: "var(--ink-soft)",
+                        }}
+                      >
+                        • {rule}
+                      </span>
+                    ))}
+                  </div>
                 )}
-                {property.owner?.email && (
-                  <a href={`mailto:${property.owner.email}`} style={{ display: "flex", alignItems: "center", gap: "5px", color: "var(--brand)", fontWeight: 700 }}>
-                    <Mail size={13} /> {property.owner.email}
-                  </a>
-                )}
               </div>
-              {property.owner?.id && (
-                <small style={{ color: "var(--muted)", fontSize: "9.5px" }}>User ID: {property.owner.id}</small>
-              )}
-            </div>
-          </div>
-
-          {/* Action Buttons in Drawer */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", paddingTop: "20px", marginTop: "16px", borderTop: "1px solid var(--border)" }}>
-            {property.status === "pending_review" ? (
-              <>
-                <button
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={() => void handleAction("approve")}
-                  style={{ background: "#166534" }}
-                >
-                  <Check size={16} /> Approve & Go Live
-                </button>
-                <button
-                  className="btn btn-outline"
-                  disabled={busy}
-                  onClick={() => void handleAction("reject")}
-                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
-                >
-                  <X size={16} /> Reject
-                </button>
-                <button
-                  className="btn btn-outline"
-                  disabled={busy}
-                  onClick={() => void handleAction("flag")}
-                >
-                  Flag for Review
-                </button>
-              </>
-            ) : property.status === "live" ? (
-              <>
-                <button
-                  className="btn btn-outline"
-                  disabled={busy}
-                  onClick={() => void handleAction("pause")}
-                  style={{ color: "#d97706", borderColor: "#fde68a" }}
-                >
-                  Pause Listing
-                </button>
-                <Link
-                  href={`/property/${property.id}`}
-                  target="_blank"
-                  className="btn btn-outline"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
-                >
-                  View on Marketplace <ArrowUpRight size={14} />
-                </Link>
-              </>
-            ) : (
-              <button
-                className="btn btn-primary"
-                disabled={busy}
-                onClick={() => void handleAction("live")}
-              >
-                <Check size={16} /> Reactivate & Make Live
-              </button>
             )}
 
-            <button
-              className="btn btn-outline"
-              disabled={busy}
-              onClick={() => void handleDelete()}
-              style={{ color: "#dc2626", borderColor: "#fca5a5", marginLeft: "auto" }}
-            >
-              <Trash2 size={15} /> Delete Listing
-            </button>
+            {/* SECTION 7: AMENITIES */}
+            {property.amenities && property.amenities.length > 0 && (
+              <div className="lead-section">
+                <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                  7. Amenities ({property.amenities.length})
+                </h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                  {property.amenities.map((amenity, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        background: "var(--brand-pale)",
+                        color: "var(--brand)",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        padding: "4px 9px",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      ✓ {amenity}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 8: DESCRIPTION */}
+            <div className="lead-section">
+              <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
+                8. Full Property Description
+              </h3>
+              <div
+                style={{
+                  background: "var(--surface-tint)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  padding: "12px 14px",
+                  fontSize: "12.5px",
+                  lineHeight: "1.7",
+                  color: "var(--ink)",
+                  whiteSpace: "pre-line",
+                }}
+              >
+                {property.description}
+              </div>
+            </div>
+
+            {/* SECTION 9: PROPERTY PHOTOS GALLERY */}
+            <div className="lead-section">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)", margin: 0 }}>
+                  9. Uploaded Property Photos ({images.length})
+                </h3>
+                <span style={{ fontSize: "11px", color: "var(--muted)" }}>Click any photo to zoom full-screen</span>
+              </div>
+              {images.length > 0 ? (
+                <div>
+                  <div
+                    onClick={() => setLightbox({ title: `${property.title} (Photo ${activePhoto + 1}/${images.length})`, url: images[activePhoto] })}
+                    style={{
+                      width: "100%",
+                      height: "280px",
+                      borderRadius: "10px",
+                      overflow: "hidden",
+                      border: "1px solid var(--border)",
+                      background: "var(--surface-soft)",
+                      cursor: "pointer",
+                      position: "relative",
+                    }}
+                  >
+                    <img src={images[activePhoto]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: "10px",
+                        bottom: "10px",
+                        background: "rgba(0,0,0,0.65)",
+                        color: "#fff",
+                        padding: "4px 9px",
+                        borderRadius: "6px",
+                        fontSize: "10.5px",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <ZoomIn size={13} /> View Full Photo ({activePhoto + 1}/{images.length})
+                    </div>
+                  </div>
+                  {images.length > 1 && (
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", overflowX: "auto", paddingBottom: "4px" }}>
+                      {images.map((img, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setActivePhoto(idx)}
+                          style={{
+                            width: "65px",
+                            height: "50px",
+                            borderRadius: "6px",
+                            overflow: "hidden",
+                            border: idx === activePhoto ? "2px solid var(--brand)" : "1px solid var(--border)",
+                            padding: 0,
+                            cursor: "pointer",
+                            opacity: idx === activePhoto ? 1 : 0.65,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: "20px", textAlign: "center", border: "1px dashed var(--border)", borderRadius: "8px", color: "var(--muted)", fontSize: "12px" }}>
+                  No photos uploaded for this property
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 10: ACTION BUTTONS IN DRAWER */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", paddingTop: "20px", marginTop: "16px", borderTop: "1px solid var(--border)" }}>
+              {property.status === "pending_review" ? (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => void handleAction("approve")}
+                    style={{ background: "#166534", padding: "10px 18px", fontWeight: 700 }}
+                  >
+                    <Check size={16} /> Approve & Go Live
+                  </button>
+                  <button
+                    className="btn btn-outline"
+                    disabled={busy}
+                    onClick={() => setRejectModalOpen(true)}
+                    style={{ color: "#dc2626", borderColor: "#fca5a5", padding: "10px 18px", fontWeight: 700 }}
+                  >
+                    <X size={16} /> Reject with Reason...
+                  </button>
+                  <button
+                    className="btn btn-outline"
+                    disabled={busy}
+                    onClick={() => void handleAction("flag")}
+                    style={{ padding: "10px 14px" }}
+                  >
+                    Flag for Review
+                  </button>
+                </>
+              ) : property.status === "live" ? (
+                <>
+                  <button
+                    className="btn btn-outline"
+                    disabled={busy}
+                    onClick={() => void handleAction("pause")}
+                    style={{ color: "#d97706", borderColor: "#fde68a" }}
+                  >
+                    Pause Listing
+                  </button>
+                  <button
+                    className="btn btn-outline"
+                    disabled={busy}
+                    onClick={() => setRejectModalOpen(true)}
+                    style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                  >
+                    Reject with Reason...
+                  </button>
+                  <Link
+                    href={`/property/${property.id}`}
+                    target="_blank"
+                    className="btn btn-outline"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+                  >
+                    View on Marketplace <ArrowUpRight size={14} />
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => void handleAction("live")}
+                  >
+                    <Check size={16} /> Reactivate & Make Live
+                  </button>
+                  <button
+                    className="btn btn-outline"
+                    disabled={busy}
+                    onClick={() => setRejectModalOpen(true)}
+                    style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                  >
+                    Update Rejection Reason...
+                  </button>
+                </>
+              )}
+
+              <button
+                className="btn btn-outline"
+                disabled={busy}
+                onClick={() => void handleDelete()}
+                style={{ color: "#dc2626", borderColor: "#fca5a5", marginLeft: "auto" }}
+              >
+                <Trash2 size={15} /> Delete
+              </button>
+            </div>
           </div>
-        </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+
+      {/* Rejection Reason Modal */}
+      {rejectModalOpen && (
+        <RejectReasonModal
+          propertyTitle={property.title}
+          ownerName={ownerDisplayName}
+          busy={busy}
+          onConfirm={async (reason) => {
+            await handleAction("reject", reason);
+            setRejectModalOpen(false);
+          }}
+          onClose={() => setRejectModalOpen(false)}
+        />
+      )}
+
+      {/* Lightbox Modal for Full Image Inspection */}
+      {lightbox && (
+        <DocumentLightboxModal
+          title={lightbox.title}
+          imageUrl={lightbox.url}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -842,6 +1752,8 @@ export function AdminDashboardExperience() {
   // Selection modals
   const [selectedLead, setSelectedLead] = useState<AdminLead | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<ModeratedProperty | null>(null);
+  const [rejectingProperty, setRejectingProperty] = useState<ModeratedProperty | null>(null);
+  const [busyQuickModerate, setBusyQuickModerate] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
@@ -924,13 +1836,16 @@ export function AdminDashboardExperience() {
     }
   }, [view, userCategoryTab, userSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function quickModerate(id: string, action: "approve" | "reject" | "flag") {
+  async function quickModerate(id: string, action: "approve" | "reject" | "flag", reason?: string) {
+    setBusyQuickModerate(true);
     try {
-      await apiFetch(`/api/admin/properties/${id}/verify`, { method: "PATCH", body: JSON.stringify({ action }) });
+      await apiFetch(`/api/admin/properties/${id}/verify`, { method: "PATCH", body: JSON.stringify({ action, reason }) });
       toast(`Listing ${action === "approve" ? "approved and verified" : action === "reject" ? "rejected" : "flagged"}`);
       await Promise.all([load(), loadProperties()]);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Couldn't review listing", "error");
+    } finally {
+      setBusyQuickModerate(false);
     }
   }
 
@@ -1898,7 +2813,7 @@ export function AdminDashboardExperience() {
                         <button className="btn btn-primary" onClick={() => void quickModerate(property.id, "approve")}>
                           <Check size={16} /> Approve & verify
                         </button>
-                        <button className="btn btn-outline" onClick={() => void quickModerate(property.id, "reject")} style={{ color: "#dc2626" }}>
+                        <button className="btn btn-outline" onClick={() => setRejectingProperty(property)} style={{ color: "#dc2626" }}>
                           <X size={16} /> Reject
                         </button>
                       </div>
@@ -1934,6 +2849,20 @@ export function AdminDashboardExperience() {
           onRefresh={async () => {
             await Promise.all([load(), loadProperties()]);
           }}
+        />
+      )}
+
+      {/* Quick Moderation Reject Reason Modal */}
+      {rejectingProperty && (
+        <RejectReasonModal
+          propertyTitle={rejectingProperty.title}
+          ownerName={rejectingProperty.ownerName || rejectingProperty.owner?.name}
+          busy={busyQuickModerate}
+          onConfirm={async (reason) => {
+            await quickModerate(rejectingProperty.id, "reject", reason);
+            setRejectingProperty(null);
+          }}
+          onClose={() => setRejectingProperty(null)}
         />
       )}
 

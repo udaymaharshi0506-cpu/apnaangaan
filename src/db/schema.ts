@@ -74,6 +74,7 @@ export const properties = pgTable("properties", {
   houseRules: jsonb("house_rules").$type<string[]>().notNull().default([]),
   itemizedCharges: jsonb("itemized_charges").$type<Record<string, unknown>>().notNull().default({}),
   status: propertyStatus("status").notNull().default("pending_review"),
+  rejectionReason: text("rejection_reason"),
   verified: boolean("verified").notNull().default(false),
   views: integer("views").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

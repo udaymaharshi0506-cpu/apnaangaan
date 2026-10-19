@@ -125,7 +125,7 @@ const propertyInput = z.object({
 
 const propertyPatchSchema = z.object({
   ...propertyRawFields,
-  status: z.enum(["paused", "sold", "rented", "live"]),
+  status: z.enum(["paused", "sold", "rented", "live", "pending_review"]),
 }).partial();
 
 function rejectContactDetails(input: Record<string, unknown>) {
@@ -491,6 +491,15 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     rejectContactDetails(input);
     if (input.status) {
       if (input.status === "live" && !existing.verified) fail(422, "Only verified listings can be made live.");
+      if (input.status === "pending_review") {
+        const [updated] = await db.update(properties).set({
+          status: "pending_review",
+          verified: false,
+          rejectionReason: null,
+          updatedAt: new Date(),
+        }).where(eq(properties.id, existing.id)).returning();
+        return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Listing resubmitted for verification." });
+      }
       const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
@@ -502,6 +511,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       ...(itemizedCharges !== undefined ? { itemizedCharges: itemizedCharges ?? {} } : {}),
       status: "pending_review",
       verified: false,
+      rejectionReason: null,
       updatedAt: new Date(),
     }).where(eq(properties.id, existing.id)).returning();
     return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Changes submitted for re-verification." });
@@ -515,7 +525,22 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       db.select({ propertyId: leads.propertyId, total: count() }).from(leads).where(eq(leads.ownerId, user.id)).groupBy(leads.propertyId),
     ]);
     const countMap = new Map(counts.map((item) => [item.propertyId, item.total]));
-    return respond({ items: items.map((item) => ({ ...serializePublicProperty(item), status: item.status, views: item.views, inquiryCount: countMap.get(item.id) || 0 })), total, page, pages: Math.ceil(total / 12) });
+    return respond({
+      items: items.map((item) => ({
+        ...serializePublicProperty(item),
+        status: item.status,
+        views: item.views,
+        inquiryCount: countMap.get(item.id) || 0,
+        rejectionReason: item.rejectionReason,
+        liveSelfieUrl: item.liveSelfieUrl,
+        aadhaarCardUrl: item.aadhaarCardUrl,
+        ownershipType: item.ownershipType,
+        coOwners: item.coOwners,
+      })),
+      total,
+      page,
+      pages: Math.ceil(total / 12),
+    });
   }
 
   // Lead creation never returns owner contact information; owner notifications are anonymous.
@@ -962,7 +987,20 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           ...serializePublicProperty(property),
           status: property.status,
           views: property.views,
-          owner: owner?.id ? owner : null,
+          liveSelfieUrl: property.liveSelfieUrl,
+          aadhaarCardUrl: property.aadhaarCardUrl,
+          ownershipType: property.ownershipType,
+          coOwners: property.coOwners,
+          ownerName: property.ownerName || owner?.name || null,
+          ownerPhone: property.ownerPhone || owner?.phone || null,
+          rejectionReason: property.rejectionReason,
+          owner: owner?.id
+            ? {
+                ...owner,
+                name: property.ownerName || owner.name,
+                phone: property.ownerPhone || owner.phone,
+              }
+            : null,
         })),
         total,
         page,
@@ -972,17 +1010,27 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     if (segments[1] === "properties" && segments.length === 4 && segments[3] === "verify" && method === "PATCH") {
       const id = validId(segments[2]);
-      const { action } = await body(request, z.object({ action: z.enum(["approve", "reject", "flag", "pause", "live"]) }));
+      const { action, reason } = await body(
+        request,
+        z.object({
+          action: z.enum(["approve", "reject", "flag", "pause", "live"]),
+          reason: z.string().trim().max(1000).optional(),
+        })
+      );
       const nextStatus = (action === "approve" || action === "live") ? "live" : action === "pause" ? "paused" : action === "reject" ? "rejected" : "pending_review";
       const verified = (action === "approve" || action === "live") ? true : action === "reject" ? false : undefined;
       const [property] = await db.update(properties).set({
         status: nextStatus,
+        rejectionReason: action === "reject" ? (reason?.trim() || "Listing does not comply with our verification standards.") : action === "approve" || action === "live" ? null : undefined,
         ...(verified !== undefined ? { verified } : {}),
         updatedAt: new Date(),
       }).where(eq(properties.id, id)).returning();
       if (!property) fail(404, "Listing not found.");
-      await sendNotification(property.ownerId, "listing", `Your listing "${property.title}" status has been updated to ${nextStatus}.`, "/owner");
-      return respond({ status: property.status, verified: property.verified });
+      const notificationMsg = action === "reject"
+        ? `Your listing "${property.title}" was not approved. Reason: ${reason?.trim() || "Listing did not meet guidelines."}`
+        : `Your listing "${property.title}" status has been updated to ${nextStatus}.`;
+      await sendNotification(property.ownerId, "listing", notificationMsg, "/owner");
+      return respond({ status: property.status, verified: property.verified, rejectionReason: property.rejectionReason });
     }
 
     if (segments[1] === "properties" && segments.length === 3 && method === "DELETE") {
