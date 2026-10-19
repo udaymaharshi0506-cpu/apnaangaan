@@ -67,15 +67,18 @@ export const hasRole = (user: User | null, role: "customer" | "owner" | "admin")
 
 export function publicSelf(user: User) {
   const isAdmin = user.roles.includes("admin") || user.role === "admin";
+  const userLoc = user.location || user.city;
   return {
     id: user.id,
     phone: user.phone,
     email: user.email,
     name: user.name,
+    city: user.city || user.location,
+    location: user.location || user.city,
     role: user.role,
     roles: user.roles,
     consentAt: user.consentAt,
-    needsOnboarding: isAdmin ? false : (!user.name || !user.consentAt || !user.phone),
+    needsOnboarding: isAdmin ? false : (!user.name || !user.consentAt || !user.phone || !userLoc),
   };
 }
 
@@ -148,7 +151,12 @@ function decodeBase32(input: string) {
 
 export function verifyAdminCode(code: string) {
   const totpSecret = process.env.ADMIN_TOTP_SECRET;
-  if (!totpSecret) return code === "000000";
+  if (!totpSecret) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[Security Notice] ADMIN_TOTP_SECRET is unset in production. Please set ADMIN_TOTP_SECRET for production 2FA security.");
+    }
+    return code === "000000";
+  }
   const key = decodeBase32(totpSecret);
   if (!key.length || !/^\d{6}$/.test(code)) return false;
   const current = Math.floor(Date.now() / 30000);

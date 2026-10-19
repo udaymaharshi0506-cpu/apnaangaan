@@ -43,6 +43,8 @@ export type AdminUser = {
   id: string;
   name: string | null;
   phone: string | null;
+  city: string | null;
+  location?: string | null;
   email: string | null;
   role: string;
   roles: Array<"customer" | "owner" | "admin">;
@@ -187,41 +189,43 @@ export function AdminLoginExperience() {
                   placeholder="000000"
                   required
                 />
-                <div
-                  style={{
-                    marginTop: "10px",
-                    marginBottom: "14px",
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    background: "rgba(180, 83, 9, 0.08)",
-                    border: "1px solid rgba(180, 83, 9, 0.25)",
-                    color: "#92400e",
-                    fontSize: "0.875rem",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>
-                    Security code (2FA): <strong style={{ letterSpacing: "1.5px", fontSize: "1rem" }}>000000</strong>
-                  </span>
-                  <button
-                    type="button"
+                {process.env.NODE_ENV !== "production" && (
+                  <div
                     style={{
-                      background: "#92400e",
-                      color: "#ffffff",
-                      border: "none",
-                      borderRadius: "5px",
-                      padding: "4px 10px",
-                      fontSize: "0.75rem",
-                      fontWeight: 600,
-                      cursor: "pointer",
+                      marginTop: "10px",
+                      marginBottom: "14px",
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      background: "rgba(180, 83, 9, 0.08)",
+                      border: "1px solid rgba(180, 83, 9, 0.25)",
+                      color: "#92400e",
+                      fontSize: "0.875rem",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
                     }}
-                    onClick={() => setCode("000000")}
                   >
-                    Fill Code
-                  </button>
-                </div>
+                    <span>
+                      Dev Security code (2FA): <strong style={{ letterSpacing: "1.5px", fontSize: "1rem" }}>000000</strong>
+                    </span>
+                    <button
+                      type="button"
+                      style={{
+                        background: "#92400e",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "5px",
+                        padding: "4px 10px",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => setCode("000000")}
+                    >
+                      Fill Code
+                    </button>
+                  </div>
+                )}
               </>
             )}
             {error && <div className="form-error">{error}</div>}
@@ -1574,7 +1578,7 @@ export function AdminDashboardExperience() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "1.8fr 1.1fr 1.4fr 1fr 1fr 100px",
+                        gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 90px",
                         gap: "10px",
                         alignItems: "center",
                         padding: "12px 20px",
@@ -1589,6 +1593,7 @@ export function AdminDashboardExperience() {
                     >
                       <span>NAME / USER</span>
                       <span>CATEGORY</span>
+                      <span style={{ color: "var(--brand)", fontWeight: 900 }}>CITY / LOCATION</span>
                       <span style={{ color: "var(--brand)", fontWeight: 900 }}>PHONE NUMBER</span>
                       <span>REGISTERED</span>
                       <span>ACTIVITY</span>
@@ -1596,7 +1601,8 @@ export function AdminDashboardExperience() {
                     </div>
 
                     {users.map((u) => {
-                      const isOwner = u.roles.includes("owner");
+                      const isAdmin = u.roles.includes("admin") || u.role === "admin";
+                      const isOwner = !isAdmin && u.roles.includes("owner");
                       const cleanPhone = u.phone ? u.phone.replace(/[\s\-\(\)]/g, "") : null;
                       const formattedPhone = cleanPhone
                         ? cleanPhone.startsWith("+")
@@ -1610,7 +1616,7 @@ export function AdminDashboardExperience() {
                           className="admin-prop-row"
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "1.8fr 1.1fr 1.4fr 1fr 1fr 100px",
+                            gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 90px",
                             gap: "10px",
                             alignItems: "center",
                             padding: "12px 20px",
@@ -1625,8 +1631,8 @@ export function AdminDashboardExperience() {
                                 width: "34px",
                                 height: "34px",
                                 borderRadius: "50%",
-                                background: isOwner ? "#fff0dc" : "#e0f2fe",
-                                color: isOwner ? "#b47740" : "#0369a1",
+                                background: isAdmin ? "#164f4c" : isOwner ? "#fff0dc" : "#e0f2fe",
+                                color: isAdmin ? "#ffffff" : isOwner ? "#b47740" : "#0369a1",
                                 display: "grid",
                                 placeItems: "center",
                                 fontWeight: 800,
@@ -1634,11 +1640,11 @@ export function AdminDashboardExperience() {
                                 flexShrink: 0,
                               }}
                             >
-                              {u.name?.charAt(0).toUpperCase() || (isOwner ? "O" : "S")}
+                              {u.name?.charAt(0).toUpperCase() || (isAdmin ? "A" : isOwner ? "O" : "S")}
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
                               <strong style={{ fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {u.name || (isOwner ? "Unnamed Owner" : "Unnamed Seeker")}
+                                {u.name || (isAdmin ? "Platform Admin" : isOwner ? "Unnamed Owner" : "Unnamed Seeker")}
                               </strong>
                               <small style={{ fontSize: "9px", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {u.email || "No email"}
@@ -1648,7 +1654,23 @@ export function AdminDashboardExperience() {
 
                           {/* Category Badge */}
                           <div>
-                            {isOwner ? (
+                            {isAdmin ? (
+                              <span
+                                className="status-pill"
+                                style={{
+                                  background: "#f1f5f9",
+                                  color: "#0f172a",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontWeight: 700,
+                                  fontSize: "9.5px",
+                                  border: "1px solid #cbd5e1",
+                                }}
+                              >
+                                <ShieldCheck size={11} /> Platform Admin
+                              </span>
+                            ) : isOwner ? (
                               <span
                                 className="status-pill"
                                 style={{
@@ -1677,6 +1699,29 @@ export function AdminDashboardExperience() {
                                 }}
                               >
                                 <Home size={11} /> Home Seeker
+                              </span>
+                            )}
+                          </div>
+
+                          {/* City / Location Column */}
+                          <div>
+                            {(u.location || u.city) ? (
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  color: "var(--foreground)",
+                                }}
+                              >
+                                <MapPin size={12} color="var(--brand)" />
+                                {u.location || u.city}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: "10px", color: "var(--muted)", fontStyle: "italic" }}>
+                                Not set
                               </span>
                             )}
                           </div>

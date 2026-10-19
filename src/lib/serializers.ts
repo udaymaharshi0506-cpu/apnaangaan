@@ -47,14 +47,23 @@ export function serializeCustomerLead(lead: Lead, property: Property, meeting?: 
   };
 }
 
-/** Owner receives an anonymous signal; no requester ID, name, phone or email. */
-export function serializeOwnerLead(lead: Lead, property: Property, meeting?: Meeting | null) {
+/** Owner receives ONLY anonymous interest; strictly NO customer name, phone number, email, or requester ID. */
+export function serializeOwnerLead(
+  lead: Lead,
+  property: Property,
+  _customerNameOrMeeting?: string | null | Meeting,
+  maybeMeeting?: Meeting | null
+) {
+  let meeting: Meeting | null | undefined = maybeMeeting;
+  if (_customerNameOrMeeting && typeof _customerNameOrMeeting === "object" && "mode" in _customerNameOrMeeting) {
+    meeting = _customerNameOrMeeting as Meeting;
+  }
   return {
     id: lead.id,
     status: lead.status,
     createdAt: lead.createdAt,
     updatedAt: lead.updatedAt,
-    property: { id: property.id, title: property.title, image: property.images[0] ?? null },
+    property: { id: property.id, title: property.title, image: property.images?.[0] ?? null },
     message: `Someone is interested in ${property.title}.`,
     meeting: serializePublicMeeting(meeting),
   };

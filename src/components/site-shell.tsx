@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
 
 export function Brand({ light = false }: { light?: boolean }) {
@@ -23,12 +23,23 @@ const navLinks = [
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, theme, toggleTheme } = useApp();
+  const { user, loading, theme, toggleTheme } = useApp();
   const [locationOpen, setLocationOpen] = useState(false);
   const [city, setCity] = useState("Bengaluru");
   const isAdmin = pathname.startsWith("/admin");
   const isPropertyDetail = pathname.startsWith("/property/");
   const isAuth = ["/login", "/signup", "/setup", "/welcome"].includes(pathname);
+
+  // Global Route Guard: prevent users who haven't completed onboarding from bypassing /setup
+  useEffect(() => {
+    if (!loading && user?.needsOnboarding) {
+      const allowedPaths = ["/setup", "/login", "/signup", "/privacy"];
+      if (!allowedPaths.includes(pathname)) {
+        router.replace(`/setup?next=${encodeURIComponent(pathname)}`);
+      }
+    }
+  }, [loading, user?.needsOnboarding, pathname, router]);
+
   if (isAdmin) return <>{children}</>;
 
   const isUserAdmin = !!user && user.roles.includes("admin");

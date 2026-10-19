@@ -1,5 +1,6 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { dispatch } from "../src/lib/api-handler";
 import { pool } from "../src/db/index";
@@ -58,20 +59,22 @@ async function runEndToEndVerification() {
     console.log("\n--- TEST 2: Seeker OTP Registration Flow ---");
     const sReq = await call("auth/otp/request", "POST", { phone: seekerPhone });
     assert.equal(sReq.status, 200);
+    await pool.query("UPDATE otp_challenges SET code_hash = $1 WHERE phone = $2", [createHash("sha256").update("123456").digest("hex"), seekerPhone]);
     const sVer = await call("auth/otp/verify", "POST", { phone: seekerPhone, code: "123456" });
     assert.equal(sVer.status, 200);
     const seekerCookie = getCookie(sVer, "aangan_access");
-    await call("profile", "PATCH", { name: "Audit Seeker", email: seekerEmail, addOwnerRole: false, consent: true }, seekerCookie);
+    await call("profile", "PATCH", { name: "Audit Seeker", email: seekerEmail, city: "Gurgaon", addOwnerRole: false, consent: true }, seekerCookie);
     record("Seeker OTP Onboarding", true, `Seeker successfully registered (${seekerPhone}).`);
 
     // 3. Owner Real OTP Authentication & Profile Setup
     console.log("\n--- TEST 3: Owner OTP Registration Flow ---");
     const oReq = await call("auth/otp/request", "POST", { phone: ownerPhone });
     assert.equal(oReq.status, 200);
+    await pool.query("UPDATE otp_challenges SET code_hash = $1 WHERE phone = $2", [createHash("sha256").update("123456").digest("hex"), ownerPhone]);
     const oVer = await call("auth/otp/verify", "POST", { phone: ownerPhone, code: "123456" });
     assert.equal(oVer.status, 200);
     const ownerCookie = getCookie(oVer, "aangan_access");
-    await call("profile", "PATCH", { name: "Audit Owner", email: ownerEmail, addOwnerRole: true, consent: true }, ownerCookie);
+    await call("profile", "PATCH", { name: "Audit Owner", email: ownerEmail, city: "South Delhi", addOwnerRole: true, consent: true }, ownerCookie);
     record("Owner OTP Onboarding", true, `Owner successfully registered and upgraded (${ownerPhone}).`);
 
     // 4. Admin Authentication Flow

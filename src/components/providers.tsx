@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CheckCircle2, Info, X } from "lucide-react";
 
-export type SessionUser = { id: string; phone: string | null; email: string | null; name: string | null; role: string; roles: Array<"customer" | "owner" | "admin">; consentAt: string | null; needsOnboarding: boolean };
+export type SessionUser = { id: string; phone: string | null; email: string | null; name: string | null; city?: string | null; location?: string | null; role: string; roles: Array<"customer" | "owner" | "admin">; consentAt: string | null; needsOnboarding: boolean };
 
 export async function apiFetch<T = Record<string, unknown>>(url: string, options: RequestInit = {}, retry = true): Promise<T> {
   let response: Response;

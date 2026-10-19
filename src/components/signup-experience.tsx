@@ -80,11 +80,7 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
       );
       await refreshUser();
       // Always go to setup on signup so users fill in their profile
-      router.push(
-        `/setup?next=${encodeURIComponent(
-          data.user.needsOnboarding ? destination : destination
-        )}`
-      );
+      router.push(`/setup?next=${encodeURIComponent(destination)}`);
       router.refresh();
       toast("Welcome to Aangan! Let's set up your profile.");
     } catch (err) {

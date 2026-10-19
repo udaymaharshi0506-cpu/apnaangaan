@@ -155,7 +155,19 @@ export function PostPropertyExperience() {
     }
     finally { setSubmitting(false); }
   }
-  async function upgrade() { try { await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify({ addOwnerRole: true }) }); await refreshUser(); toast("Owner tools activated"); } catch { toast("Couldn't activate owner tools", "error"); } }
+  async function upgrade() {
+    if (!user?.phone) {
+      router.push(`/setup?next=${encodeURIComponent("/post-property")}`);
+      return;
+    }
+    try {
+      await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify({ addOwnerRole: true }) });
+      await refreshUser();
+      toast("Owner tools activated");
+    } catch {
+      toast("Couldn't activate owner tools", "error");
+    }
+  }
   if (!loading && !user) return <main className="member-page"><div className="container"><div className="account-gate"><span><LockKeyhole size={30}/></span><h2>Let&apos;s get your space listed.</h2><p>Sign in first to share your property securely with the Aangan community.</p><Link href="/login?next=/post-property" className="btn btn-primary">Log in to continue <ArrowRight size={17}/></Link></div></div></main>;
   if (!loading && user && !user.roles.includes("owner") && !user.roles.includes("admin")) return <main className="member-page"><div className="container"><div className="account-gate"><span><KeyRound size={30}/></span><h2>Become an Aangan owner.</h2><p>Activate your owner space to post a property and receive private, anonymous interest updates.</p><button onClick={() => void upgrade()} className="btn btn-primary">Activate owner tools <ArrowRight size={17}/></button></div></div></main>;
   const currentCategory = categories.find((item) => item.value === form.category);

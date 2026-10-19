@@ -11,6 +11,8 @@ export const users = pgTable("users", {
   phone: varchar("phone", { length: 20 }).unique(),
   email: varchar("email", { length: 255 }).unique(),
   name: varchar("name", { length: 150 }),
+  city: varchar("city", { length: 120 }),
+  location: varchar("location", { length: 255 }),
   passwordHash: text("password_hash"),
   role: varchar("role", { length: 20 }).notNull().default("customer"),
   roles: jsonb("roles").$type<Array<"customer" | "owner" | "admin">>().notNull().default(["customer"]),

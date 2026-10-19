@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS users (
   phone VARCHAR(20) UNIQUE,
   email VARCHAR(255) UNIQUE,
   name VARCHAR(150),
+  city VARCHAR(120),
+  location VARCHAR(255),
   password_hash TEXT,
   role VARCHAR(20) NOT NULL DEFAULT 'customer',
   roles JSONB NOT NULL DEFAULT '["customer"]'::jsonb,

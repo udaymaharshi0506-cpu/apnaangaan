@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { hash } from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export const DEFAULT_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@aangan.com";
 export const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "AanganSecure2026!";
@@ -9,6 +9,10 @@ export const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "AanganSecur
 /** Ensure the administrative account exists so authorized team members can log into /admin. */
 export async function ensureAdminAccount() {
   try {
+    try {
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city varchar(120);`);
+    } catch { /* Ignore if already present */ }
+
     const adminEmail = (process.env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL).toLowerCase().trim();
     const [existing] = await db.select().from(users).where(eq(users.email, adminEmail)).limit(1);
     if (!existing) {

@@ -20,6 +20,9 @@ test("Role separation: hasRole correctly identifies customer, owner, and admin",
     roles: ["customer"],
     role: "customer",
     name: "Customer User",
+    phone: "+919876543210",
+    city: "Bengaluru",
+    location: "Bengaluru",
   } as User;
 
   const ownerUser = {
