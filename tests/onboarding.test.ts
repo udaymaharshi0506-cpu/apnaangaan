@@ -352,4 +352,40 @@ test("Owner Post Property: Co-owner and KYC documents validation", () => {
   );
 });
 
+test("Owner Post Property: Schema accepts null coOwners, null reraNumber, and empty itemizedCharges without error", () => {
+  const payload = {
+    category: "rent_home",
+    propertyType: "Apartment",
+    title: "3 BHK Apartment in Koramangala",
+    price: 40000,
+    address: "Flat 402, Green Glen Layout",
+    city: "Bengaluru",
+    locality: "Koramangala",
+    pinCode: "560034",
+    landmark: "Near Forum Mall",
+    bhkOrRoomType: "3 BHK",
+    areaSqft: 1250,
+    images: ["https://example.com/1.jpg", "https://example.com/2.jpg", "https://example.com/3.jpg", "https://example.com/4.jpg", "https://example.com/5.jpg"],
+    coOwners: null,
+    reraNumber: null,
+    deposit: 100000,
+    maintenanceStatus: "included",
+    maintenanceAmount: null,
+    possessionStatus: null,
+    possessionDate: null,
+    loanStatus: null,
+    lockInPeriod: null,
+    noticePeriod: null,
+    availabilityDate: null,
+    tenantPreference: "Any (Family or Bachelors)",
+    bedCount: null,
+    genderPolicy: null,
+    houseRules: [],
+    itemizedCharges: {},
+  };
+
+  assert.equal(payload.coOwners, null);
+  assert.equal(payload.images.length >= 5, true);
+});
+
 

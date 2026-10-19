@@ -500,28 +500,28 @@ export function PostPropertyExperience() {
         liveSelfieUrl: form.liveSelfieUrl,
         aadhaarCardUrl: form.aadhaarCardUrl,
         ownershipType: form.ownershipType,
-        coOwners: form.coOwners || null,
+        coOwners: form.ownershipType === "co_owner" && form.coOwners ? form.coOwners.trim() : null,
         // Financials & Terms
-        maintenanceStatus: form.maintenanceStatus,
+        maintenanceStatus: form.maintenanceStatus || "included",
         maintenanceAmount: cleanMaintenance,
-        possessionStatus: form.possessionStatus,
+        possessionStatus: form.category === "buy_home" ? form.possessionStatus : null,
         possessionDate: form.possessionDate ? new Date(form.possessionDate).toISOString() : null,
-        loanStatus: form.loanStatus,
-        reraNumber: form.reraNumber || null,
-        lockInPeriod: form.lockInPeriod,
-        noticePeriod: form.noticePeriod,
+        loanStatus: form.category === "buy_home" ? form.loanStatus : null,
+        reraNumber: form.reraNumber ? form.reraNumber.trim() : null,
+        lockInPeriod: form.lockInPeriod || null,
+        noticePeriod: form.noticePeriod || null,
         availabilityDate: form.availableFrom ? new Date(form.availableFrom).toISOString() : null,
-        tenantPreference: form.tenantPreference,
+        tenantPreference: form.category === "rent_home" ? form.tenantPreference : null,
         // PG Details
         bedCount: form.category === "rent_pg" ? form.bedCount : null,
         genderPolicy: form.category === "rent_pg" ? form.genderPolicy : null,
-        houseRules: form.houseRules,
-        itemizedCharges: {
+        houseRules: form.houseRules || [],
+        itemizedCharges: form.category === "rent_pg" ? {
           food: form.foodCost,
           electricity: form.electricityCost,
           wifi: form.wifiCost,
           laundry: form.laundryCost,
-        },
+        } : {},
       };
 
       await apiFetch("/api/properties", { method: "POST", body: JSON.stringify(payload) });

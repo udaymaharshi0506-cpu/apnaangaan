@@ -63,17 +63,17 @@ const propertyRawFields = {
   address: z.string().trim().min(2, "Address must be at least 2 characters.").max(500),
   city: z.string().trim().min(2).max(100),
   locality: z.string().trim().min(2).max(120),
-  pinCode: z.string().trim().max(10).optional(),
-  landmark: z.string().trim().max(255).optional(),
+  pinCode: z.string().trim().max(10).nullable().optional(),
+  landmark: z.string().trim().max(255).nullable().optional(),
   latitude: z.coerce.number().min(-90).max(90).nullable().optional(),
   longitude: z.coerce.number().min(-180).max(180).nullable().optional(),
   bhkOrRoomType: z.string().trim().min(1).max(50),
   areaSqft: z.coerce.number().int().positive("Area must be positive.").max(10000000),
   bathrooms: z.coerce.number().int().min(0).max(100).optional(),
-  floor: z.string().trim().max(30).optional(),
-  totalFloors: z.coerce.number().int().min(0).max(200).optional(),
-  propertyAge: z.string().trim().max(50).optional(),
-  facing: z.string().trim().max(30).optional(),
+  floor: z.string().trim().max(30).nullable().optional(),
+  totalFloors: z.coerce.number().int().min(0).max(200).nullable().optional(),
+  propertyAge: z.string().trim().max(50).nullable().optional(),
+  facing: z.string().trim().max(30).nullable().optional(),
   furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).optional(),
   amenities: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
   images: z.array(z.string().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide photos.").max(25),
@@ -86,20 +86,20 @@ const propertyRawFields = {
   liveSelfieUrl: z.string().max(2000).nullable().optional(),
   aadhaarCardUrl: z.string().max(2000).nullable().optional(),
   ownershipType: z.enum(["sole_owner", "co_owner"]).optional(),
-  coOwners: z.string().trim().max(1000).optional(),
+  coOwners: z.string().trim().max(1000).nullable().optional(),
   // Financials & Terms
-  maintenanceStatus: z.string().trim().max(30).optional(),
+  maintenanceStatus: z.string().trim().max(30).nullable().optional(),
   maintenanceAmount: z.coerce.number().int().nonnegative().nullable().optional(),
-  possessionStatus: z.string().trim().max(50).optional(),
+  possessionStatus: z.string().trim().max(50).nullable().optional(),
   possessionDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
-  loanStatus: z.string().trim().max(100).optional(),
-  lockInPeriod: z.string().trim().max(50).optional(),
-  noticePeriod: z.string().trim().max(50).optional(),
-  tenantPreference: z.string().trim().max(100).optional(),
-  bedCount: z.string().trim().max(50).optional(),
-  genderPolicy: z.string().trim().max(50).optional(),
+  loanStatus: z.string().trim().max(100).nullable().optional(),
+  lockInPeriod: z.string().trim().max(50).nullable().optional(),
+  noticePeriod: z.string().trim().max(50).nullable().optional(),
+  tenantPreference: z.string().trim().max(100).nullable().optional(),
+  bedCount: z.string().trim().max(50).nullable().optional(),
+  genderPolicy: z.string().trim().max(50).nullable().optional(),
   houseRules: z.array(z.string().trim().max(100)).optional(),
-  itemizedCharges: z.record(z.string(), z.unknown()).optional(),
+  itemizedCharges: z.record(z.string(), z.unknown()).nullable().optional().transform((val) => val ?? {}),
 };
 
 const propertyInput = z.object({
@@ -494,11 +494,12 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
-    const { status: _ignoredStatus, availabilityDate, possessionDate, ...changes } = input;
+    const { status: _ignoredStatus, availabilityDate, possessionDate, itemizedCharges, ...changes } = input;
     const [updated] = await db.update(properties).set({
       ...changes,
       ...(availabilityDate !== undefined ? { availabilityDate: availabilityDate ? new Date(availabilityDate) : null } : {}),
       ...(possessionDate !== undefined ? { possessionDate: possessionDate ? new Date(possessionDate) : null } : {}),
+      ...(itemizedCharges !== undefined ? { itemizedCharges: itemizedCharges ?? {} } : {}),
       status: "pending_review",
       verified: false,
       updatedAt: new Date(),
