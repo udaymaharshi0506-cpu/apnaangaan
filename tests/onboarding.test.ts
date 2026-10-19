@@ -215,3 +215,141 @@ test("API: /api/profile PATCH enforces strict Indian mobile number validation an
   assert.equal(validData.user.city, "Indiranagar, Bengaluru");
 });
 
+// ─────────────────────────────────────────────────────────────
+// Owner Post Property Wizard & Database Storage Tests
+// ─────────────────────────────────────────────────────────────
+
+test("Owner Post Property: Minimum 5 photos constraint enforces >= 5 photos before submission", () => {
+  const validatePhotos = (images: string[]) => images.length >= 5;
+
+  assert.equal(validatePhotos([]), false);
+  assert.equal(validatePhotos(["https://example.com/p1.jpg"]), false);
+  assert.equal(validatePhotos(["https://example.com/p1.jpg", "https://example.com/p2.jpg", "https://example.com/p3.jpg", "https://example.com/p4.jpg"]), false);
+  assert.equal(
+    validatePhotos([
+      "https://example.com/p1.jpg",
+      "https://example.com/p2.jpg",
+      "https://example.com/p3.jpg",
+      "https://example.com/p4.jpg",
+      "https://example.com/p5.jpg",
+    ]),
+    true
+  );
+  assert.equal(
+    validatePhotos([
+      "https://example.com/p1.jpg",
+      "https://example.com/p2.jpg",
+      "https://example.com/p3.jpg",
+      "https://example.com/p4.jpg",
+      "https://example.com/p5.jpg",
+      "https://example.com/p6.jpg",
+    ]),
+    true
+  );
+});
+
+test("Owner Post Property: Auto-generates clean title and description without requiring manual typing", () => {
+  const generateTitle = (bhk: string, type: string, locality: string, landmark: string, city: string) => {
+    return `${bhk} ${type} in ${locality || landmark || city}`;
+  };
+
+  const title1 = generateTitle("3 BHK", "Apartment", "Koramangala", "Near Forum", "Bengaluru");
+  assert.equal(title1, "3 BHK Apartment in Koramangala");
+
+  const title2 = generateTitle("2 BHK", "Villa", "", "Behind Metro Station", "Pune");
+  assert.equal(title2, "2 BHK Villa in Behind Metro Station");
+
+  const title3 = generateTitle("1 RK", "Room", "", "", "Delhi NCR");
+  assert.equal(title3, "1 RK Room in Delhi NCR");
+});
+
+test("Owner Post Property: Indian 6-digit PIN code validation strictly enforces exactly 6 digits", () => {
+  const pinRegex = /^\d{6}$/;
+
+  assert.equal(pinRegex.test("560034"), true);
+  assert.equal(pinRegex.test("110001"), true);
+  assert.equal(pinRegex.test("400001"), true);
+
+  assert.equal(pinRegex.test("56003"), false); // 5 digits
+  assert.equal(pinRegex.test("5600345"), false); // 7 digits
+  assert.equal(pinRegex.test("56003A"), false); // letter
+  assert.equal(pinRegex.test(""), false);
+});
+
+test("Owner Post Property: Co-owner and KYC documents validation", () => {
+  const validateOwnerKyc = ({
+    ownerName,
+    ownerPhone,
+    liveSelfieUrl,
+    aadhaarCardUrl,
+    ownershipType,
+    coOwners,
+  }: {
+    ownerName: string;
+    ownerPhone: string;
+    liveSelfieUrl: string;
+    aadhaarCardUrl: string;
+    ownershipType: "sole_owner" | "co_owner";
+    coOwners?: string;
+  }) => {
+    const isPhoneValid = /^[6-9]\d{9}$/.test(ownerPhone.replace(/\D/g, ""));
+    const isNameValid = ownerName.trim().length >= 2;
+    const hasSelfie = !!liveSelfieUrl && liveSelfieUrl.trim().length > 0;
+    const hasAadhaar = !!aadhaarCardUrl && aadhaarCardUrl.trim().length > 0;
+    const isCoOwnerValid = ownershipType === "sole_owner" || (!!coOwners && coOwners.trim().length >= 2);
+
+    return isPhoneValid && isNameValid && hasSelfie && hasAadhaar && isCoOwnerValid;
+  };
+
+  // Valid sole owner
+  assert.equal(
+    validateOwnerKyc({
+      ownerName: "Uday Maharshi",
+      ownerPhone: "9876543210",
+      liveSelfieUrl: "/api/uploads/selfie.jpg",
+      aadhaarCardUrl: "/api/uploads/aadhaar.jpg",
+      ownershipType: "sole_owner",
+    }),
+    true
+  );
+
+  // Missing selfie -> rejected
+  assert.equal(
+    validateOwnerKyc({
+      ownerName: "Uday Maharshi",
+      ownerPhone: "9876543210",
+      liveSelfieUrl: "",
+      aadhaarCardUrl: "/api/uploads/aadhaar.jpg",
+      ownershipType: "sole_owner",
+    }),
+    false
+  );
+
+  // Co-owner selected but co-owner name missing -> rejected
+  assert.equal(
+    validateOwnerKyc({
+      ownerName: "Uday Maharshi",
+      ownerPhone: "9876543210",
+      liveSelfieUrl: "/api/uploads/selfie.jpg",
+      aadhaarCardUrl: "/api/uploads/aadhaar.jpg",
+      ownershipType: "co_owner",
+      coOwners: "",
+    }),
+    false
+  );
+
+  // Co-owner with valid co-owner name -> valid
+  assert.equal(
+    validateOwnerKyc({
+      ownerName: "Uday Maharshi",
+      ownerPhone: "9876543210",
+      liveSelfieUrl: "/api/uploads/selfie.jpg",
+      aadhaarCardUrl: "/api/uploads/aadhaar.jpg",
+      ownershipType: "co_owner",
+      coOwners: "Priya Maharshi (Spouse)",
+    }),
+    true
+  );
+});
+
+

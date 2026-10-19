@@ -56,37 +56,65 @@ const phoneSchema = z.object({ phone: z.string().regex(/^\+91[6-9]\d{9}$/, "Ente
 const propertyRawFields = {
   category: z.enum(["buy_home", "rent_home", "rent_pg", "rent_commercial"]),
   propertyType: z.string().trim().min(1).max(60),
-  title: z.string().trim().min(3, "Title must be at least 3 characters.").max(180),
-  description: z.string().trim().min(5, "Description must be at least 5 characters.").max(5000),
+  title: z.string().trim().max(180).optional(),
+  description: z.string().trim().max(5000).optional(),
   price: z.coerce.number().int().positive("Price must be a positive number.").max(100000000000),
-  priceType: z.enum(["fixed", "negotiable"]),
-  address: z.string().trim().min(2, "Address must be at least 2 characters.").max(300),
+  priceType: z.enum(["fixed", "negotiable"]).optional(),
+  address: z.string().trim().min(2, "Address must be at least 2 characters.").max(500),
   city: z.string().trim().min(2).max(100),
   locality: z.string().trim().min(2).max(120),
+  pinCode: z.string().trim().max(10).optional(),
+  landmark: z.string().trim().max(255).optional(),
   latitude: z.coerce.number().min(-90).max(90).nullable().optional(),
   longitude: z.coerce.number().min(-180).max(180).nullable().optional(),
   bhkOrRoomType: z.string().trim().min(1).max(50),
   areaSqft: z.coerce.number().int().positive("Area must be positive.").max(10000000),
-  bathrooms: z.coerce.number().int().min(0).max(100),
-  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]),
-  amenities: z.array(z.string().trim().min(1).max(60)).max(50),
-  images: z.array(z.string().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide at least one photo.").max(25),
+  bathrooms: z.coerce.number().int().min(0).max(100).optional(),
+  floor: z.string().trim().max(30).optional(),
+  totalFloors: z.coerce.number().int().min(0).max(200).optional(),
+  propertyAge: z.string().trim().max(50).optional(),
+  facing: z.string().trim().max(30).optional(),
+  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).optional(),
+  amenities: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
+  images: z.array(z.string().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide photos.").max(25),
   availabilityDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
   reraNumber: z.string().trim().max(100).nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
   deposit: z.coerce.number().int().nonnegative().nullable().optional(),
+  // Owner KYC & identity
+  ownerName: z.string().trim().max(150).optional(),
+  ownerPhone: z.string().trim().max(20).optional(),
+  liveSelfieUrl: z.string().max(2000).nullable().optional(),
+  aadhaarCardUrl: z.string().max(2000).nullable().optional(),
+  ownershipType: z.enum(["sole_owner", "co_owner"]).optional(),
+  coOwners: z.string().trim().max(1000).optional(),
+  // Financials & Terms
+  maintenanceStatus: z.string().trim().max(30).optional(),
+  maintenanceAmount: z.coerce.number().int().nonnegative().nullable().optional(),
+  possessionStatus: z.string().trim().max(50).optional(),
+  possessionDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
+  loanStatus: z.string().trim().max(100).optional(),
+  lockInPeriod: z.string().trim().max(50).optional(),
+  noticePeriod: z.string().trim().max(50).optional(),
+  tenantPreference: z.string().trim().max(100).optional(),
+  bedCount: z.string().trim().max(50).optional(),
+  genderPolicy: z.string().trim().max(50).optional(),
+  houseRules: z.array(z.string().trim().max(100)).optional(),
+  itemizedCharges: z.record(z.string(), z.unknown()).optional(),
 };
 
 const propertyInput = z.object({
   ...propertyRawFields,
-  priceType: propertyRawFields.priceType.default("fixed"),
-  bathrooms: propertyRawFields.bathrooms.default(1),
-  furnishingStatus: propertyRawFields.furnishingStatus.default("Unfurnished"),
-  amenities: propertyRawFields.amenities.default([]),
+  priceType: z.enum(["fixed", "negotiable"]).default("fixed"),
+  bathrooms: z.coerce.number().int().min(0).max(100).default(1),
+  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).default("Unfurnished"),
+  amenities: z.array(z.string().trim().min(1).max(60)).default([]),
+  houseRules: z.array(z.string().trim().max(100)).default([]),
+  itemizedCharges: z.record(z.string(), z.unknown()).default({}),
 }).superRefine((data, context) => {
   const allowed: Record<string, string[]> = {
-    buy_home: ["Apartment", "Independent house", "Villa", "Plot"],
-    rent_home: ["Apartment", "Independent house"],
-    rent_pg: ["PG", "Co-living"],
+    buy_home: ["Apartment", "Independent house", "Villa", "Plot", "Commercial"],
+    rent_home: ["Apartment", "Independent house", "Villa", "Commercial"],
+    rent_pg: ["PG", "Co-living", "Room"],
     rent_commercial: ["Office", "Shop", "Showroom", "Warehouse"]
   };
   const list = allowed[data.category];
@@ -403,7 +431,51 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
     const input = await body(request, propertyInput);
     rejectContactDetails(input);
-    const [property] = await db.insert(properties).values({ ...input, ownerId: user.id, availabilityDate: input.availabilityDate ? new Date(input.availabilityDate) : null, latitude: input.latitude ?? null, longitude: input.longitude ?? null, reraNumber: input.reraNumber || null, deposit: input.deposit ?? null, status: "pending_review", verified: false }).returning();
+    const title = input.title?.trim() || `${input.bhkOrRoomType} ${input.propertyType} in ${input.locality || input.landmark || input.city}`;
+    const description = input.description?.trim() || `${input.bhkOrRoomType} ${input.propertyType} (${input.areaSqft} sq ft) located in ${input.locality || input.city}. Furnishing: ${input.furnishingStatus || "Unfurnished"}.`;
+    const [property] = await db.insert(properties).values({
+      ...input,
+      title,
+      description,
+      ownerId: user.id,
+      availabilityDate: input.availabilityDate ? new Date(input.availabilityDate) : null,
+      possessionDate: input.possessionDate ? new Date(input.possessionDate) : null,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      reraNumber: input.reraNumber || null,
+      deposit: input.deposit ?? null,
+      ownerName: input.ownerName || user.name,
+      ownerPhone: input.ownerPhone || user.phone,
+      liveSelfieUrl: input.liveSelfieUrl || null,
+      aadhaarCardUrl: input.aadhaarCardUrl || null,
+      ownershipType: input.ownershipType || "sole_owner",
+      coOwners: input.coOwners || null,
+      pinCode: input.pinCode || null,
+      landmark: input.landmark || null,
+      floor: input.floor || null,
+      totalFloors: input.totalFloors ?? null,
+      propertyAge: input.propertyAge || null,
+      facing: input.facing || null,
+      maintenanceStatus: input.maintenanceStatus || null,
+      maintenanceAmount: input.maintenanceAmount ?? null,
+      possessionStatus: input.possessionStatus || null,
+      loanStatus: input.loanStatus || null,
+      lockInPeriod: input.lockInPeriod || null,
+      noticePeriod: input.noticePeriod || null,
+      tenantPreference: input.tenantPreference || null,
+      bedCount: input.bedCount || null,
+      genderPolicy: input.genderPolicy || null,
+      houseRules: input.houseRules || [],
+      itemizedCharges: input.itemizedCharges || {},
+      status: "pending_review",
+      verified: false,
+    }).returning();
+    if (input.liveSelfieUrl || input.aadhaarCardUrl) {
+      await db.update(users).set({
+        liveSelfieUrl: input.liveSelfieUrl || undefined,
+        aadhaarCardUrl: input.aadhaarCardUrl || undefined,
+      }).where(eq(users.id, user.id));
+    }
     await sendNotification(user.id, "listing", `Your listing ${property.title} was submitted for verification.`, "/owner");
     return respond({ property: serializePublicProperty(property), status: property.status, message: "Listing submitted for verification." }, 201);
   }
@@ -422,8 +494,15 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
-    const { status: _ignoredStatus, availabilityDate, ...changes } = input;
-    const [updated] = await db.update(properties).set({ ...changes, ...(availabilityDate !== undefined ? { availabilityDate: availabilityDate ? new Date(availabilityDate) : null } : {}), status: "pending_review", verified: false, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
+    const { status: _ignoredStatus, availabilityDate, possessionDate, ...changes } = input;
+    const [updated] = await db.update(properties).set({
+      ...changes,
+      ...(availabilityDate !== undefined ? { availabilityDate: availabilityDate ? new Date(availabilityDate) : null } : {}),
+      ...(possessionDate !== undefined ? { possessionDate: possessionDate ? new Date(possessionDate) : null } : {}),
+      status: "pending_review",
+      verified: false,
+      updatedAt: new Date(),
+    }).where(eq(properties.id, existing.id)).returning();
     return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Changes submitted for re-verification." });
   }
   if (route === "owner/properties" && method === "GET") {
