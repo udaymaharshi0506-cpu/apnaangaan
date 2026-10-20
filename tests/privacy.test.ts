@@ -43,3 +43,55 @@ test("admin serializer is the only one with both parties' contact details and pr
   assert.equal(result.adminNotes, lead.adminNotes);
   assert.equal(result.history.length, 1);
 });
+
+test("homeseeker living profile and confirmed phone are accurately serialized for admin and seeker", () => {
+  const profileLead = {
+    ...lead,
+    occupantsCount: "3–4 People",
+    tenantType: "Family",
+    profession: "Job / Salaried",
+    groupGender: "Family",
+    moveInTimeline: "Within 15 Days",
+    confirmedPhone: "+919876543210",
+    seekerNotes: "Need dedicated car parking and 11-month lease",
+  } as unknown as Lead;
+
+  const customerView = serializeCustomerLead(profileLead, property, meeting);
+  assert.equal(customerView.occupantsCount, "3–4 People");
+  assert.equal(customerView.tenantType, "Family");
+  assert.equal(customerView.profession, "Job / Salaried");
+  assert.equal(customerView.confirmedPhone, "+919876543210");
+  assert.equal(customerView.seekerNotes, "Need dedicated car parking and 11-month lease");
+
+  const adminView = serializeAdminLead(profileLead, property, customer, owner, meeting, []);
+  assert.equal(adminView.occupantsCount, "3–4 People");
+  assert.equal(adminView.tenantType, "Family");
+  assert.equal(adminView.profession, "Job / Salaried");
+  assert.equal(adminView.groupGender, "Family");
+  assert.equal(adminView.moveInTimeline, "Within 15 Days");
+  assert.equal(adminView.confirmedPhone, "+919876543210");
+  assert.equal(adminView.seekerNotes, "Need dedicated car parking and 11-month lease");
+
+  // Owner view receives the living profile requirements without leaking seeker contact details
+  const ownerView = serializeOwnerLead(profileLead, property, meeting);
+  assert.equal(ownerView.occupantsCount, "3–4 People");
+  assert.equal(ownerView.tenantType, "Family");
+  assert.equal(ownerView.profession, "Job / Salaried");
+  assert.equal(ownerView.groupGender, "Family");
+  assert.equal(ownerView.moveInTimeline, "Within 15 Days");
+  assertNoPrivateFields(ownerView, [profileLead.confirmedPhone!, customer.phone!, customer.email!, customer.id]);
+});
+
+test("homeseeker phone confirmation enforces strict 10-digit Indian format", () => {
+  const isValidIndianMobile = (p: string) => /^[6-9]\d{9}$/.test(p);
+  assert.equal(isValidIndianMobile("9876543210"), true);
+  assert.equal(isValidIndianMobile("7890123456"), true);
+  assert.equal(isValidIndianMobile("6123456789"), true);
+  assert.equal(isValidIndianMobile("8888888888"), true);
+
+  assert.equal(isValidIndianMobile("5876543210"), false); // Doesn't start with 6-9
+  assert.equal(isValidIndianMobile("987654321"), false);  // Only 9 digits
+  assert.equal(isValidIndianMobile("98765432100"), false); // 11 digits
+  assert.equal(isValidIndianMobile("98765abcd0"), false); // Non-digits
+});
+

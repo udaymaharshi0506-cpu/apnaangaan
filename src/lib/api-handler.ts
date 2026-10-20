@@ -548,21 +548,99 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const user = await requireUser(request);
     if (!hasRole(user, "customer") && !hasRole(user, "owner")) fail(403, "Only property seekers can express interest.");
     if (!user.consentAt || !user.phone) fail(403, "Please complete your profile and provide a contact phone number before sending an inquiry.");
-    const { propertyId, preferredContactTime } = await body(request, z.object({ propertyId: uuid, preferredContactTime: z.string().trim().max(100).optional() }));
+    const {
+      propertyId,
+      preferredContactTime,
+      occupantsCount,
+      tenantType,
+      profession,
+      groupGender,
+      moveInTimeline,
+      confirmedPhone,
+      seekerNotes,
+    } = await body(
+      request,
+      z.object({
+        propertyId: uuid,
+        preferredContactTime: z.string().trim().max(100).optional(),
+        occupantsCount: z.string().trim().max(50).optional(),
+        tenantType: z.string().trim().max(100).optional(),
+        profession: z.string().trim().max(100).optional(),
+        groupGender: z.string().trim().max(50).optional(),
+        moveInTimeline: z.string().trim().max(100).optional(),
+        confirmedPhone: z.string().trim().max(20).optional(),
+        seekerNotes: z.string().trim().max(1000).optional(),
+      })
+    );
     const property = await getProperty(propertyId);
     if (!property) fail(404, "Property not found.");
     if (property.ownerId === user.id) fail(422, "You cannot inquire about your own listing.");
+
+    let cleanPhone = confirmedPhone?.replace(/\D/g, "") || "";
+    if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
+    const validPhone = /^[6-9]\d{9}$/.test(cleanPhone) ? `+91${cleanPhone}` : (user.phone || null);
+    if (validPhone && !user.phone) {
+      await db.update(users).set({ phone: validPhone }).where(eq(users.id, user.id));
+    }
+
     const [previous] = await db.select().from(leads).where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId))).limit(1);
-    if (previous) return respond({ lead: serializeCustomerLead(previous, property, await latestMeeting(previous.id)), message: "You've already expressed interest in this property." });
-    const [created] = await db.insert(leads).values({ customerId: user.id, ownerId: property.ownerId, propertyId, preferredContactTime: preferredContactTime || null }).onConflictDoNothing().returning();
+    if (previous) {
+      const [updated] = await db
+        .update(leads)
+        .set({
+          preferredContactTime: preferredContactTime || previous.preferredContactTime,
+          occupantsCount: occupantsCount || previous.occupantsCount,
+          tenantType: tenantType || previous.tenantType,
+          profession: profession || previous.profession,
+          groupGender: groupGender || previous.groupGender,
+          moveInTimeline: moveInTimeline || previous.moveInTimeline,
+          confirmedPhone: validPhone || previous.confirmedPhone,
+          seekerNotes: seekerNotes || previous.seekerNotes,
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, previous.id))
+        .returning();
+      return respond({ lead: serializeCustomerLead(updated, property, await latestMeeting(previous.id)), message: "Your inquiry details have been updated." });
+    }
+
+    const [created] = await db
+      .insert(leads)
+      .values({
+        customerId: user.id,
+        ownerId: property.ownerId,
+        propertyId,
+        preferredContactTime: preferredContactTime || null,
+        occupantsCount: occupantsCount || null,
+        tenantType: tenantType || null,
+        profession: profession || null,
+        groupGender: groupGender || null,
+        moveInTimeline: moveInTimeline || null,
+        confirmedPhone: validPhone,
+        seekerNotes: seekerNotes || null,
+      })
+      .onConflictDoNothing()
+      .returning();
+
     if (!created) {
       const [existing] = await db.select().from(leads).where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId))).limit(1);
       return respond({ lead: serializeCustomerLead(existing, property), message: "You've already expressed interest in this property." });
     }
     const seekerDisplayName = user.name?.trim() || "A home seeker";
+    const profileSummary = [
+      tenantType ? `${tenantType}` : "",
+      occupantsCount ? `(${occupantsCount})` : "",
+      profession ? `· ${profession}` : "",
+      groupGender ? `· ${groupGender}` : "",
+      moveInTimeline ? `· Move-in: ${moveInTimeline}` : "",
+    ].filter(Boolean).join(" ");
+
     await Promise.all([
-      db.insert(leadEvents).values({ leadId: created.id, eventType: "created", detail: `${seekerDisplayName} expressed interest.` }),
-      sendNotification(property.ownerId, "interest", `A verified home seeker showed interest in your property "${property.title}".`, "/owner"),
+      db.insert(leadEvents).values({
+        leadId: created.id,
+        eventType: "created",
+        detail: `${seekerDisplayName} expressed interest${profileSummary ? `: ${profileSummary}` : "."}`,
+      }),
+      sendNotification(property.ownerId, "interest", `A verified home seeker (${tenantType || "seeker"}) showed interest in your property "${property.title}".`, "/owner"),
       sendNotification(user.id, "inquiry", `Your interest in "${property.title}" was received. Our team will be in touch.`, "/inquiries"),
     ]);
     return respond({ lead: serializeCustomerLead(created, property), message: "Your interest has been noted. Our team will reach out to arrange a viewing or call." }, 201);

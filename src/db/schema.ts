@@ -89,6 +89,13 @@ export const leads = pgTable("leads", {
   status: leadStatus("status").notNull().default("new"),
   adminNotes: text("admin_notes"),
   preferredContactTime: varchar("preferred_contact_time", { length: 100 }),
+  occupantsCount: varchar("occupants_count", { length: 50 }),
+  tenantType: varchar("tenant_type", { length: 100 }),
+  profession: varchar("profession", { length: 100 }),
+  groupGender: varchar("group_gender", { length: 50 }),
+  moveInTimeline: varchar("move_in_timeline", { length: 100 }),
+  confirmedPhone: varchar("confirmed_phone", { length: 20 }),
+  seekerNotes: text("seeker_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("leads_status_idx").on(table.status), index("leads_customer_idx").on(table.customerId), index("leads_owner_idx").on(table.ownerId), uniqueIndex("leads_customer_property_unique").on(table.customerId, table.propertyId)]);

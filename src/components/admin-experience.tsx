@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   BadgeAlert,
   BadgeCheck,
+  Briefcase,
   Building2,
   CalendarDays,
   Camera,
@@ -19,6 +20,8 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Clock3,
+  Copy,
   ExternalLink,
   Eye,
   FileCheck2,
@@ -32,6 +35,7 @@ import {
   Mail,
   MapPin,
   Menu,
+  MessageCircle,
   MessageSquare,
   Phone,
   Search,
@@ -41,6 +45,7 @@ import {
   Sparkles,
   Trash2,
   UserCheck,
+  Users,
   UsersRound,
   X,
   ZoomIn,
@@ -72,10 +77,24 @@ export type AdminLead = {
   status: string;
   adminNotes: string | null;
   preferredContactTime: string | null;
+  occupantsCount?: string | null;
+  tenantType?: string | null;
+  profession?: string | null;
+  groupGender?: string | null;
+  moveInTimeline?: string | null;
+  confirmedPhone?: string | null;
+  seekerNotes?: string | null;
   createdAt: string;
   updatedAt: string;
   property: PublicProperty;
-  customer: { id: string; name: string | null; phone: string | null; email: string | null };
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    city?: string | null;
+    location?: string | null;
+  };
   owner: { id: string; name: string | null; phone: string | null; email: string | null };
   meeting: { id: string; scheduledAt: string; mode: string; status: string } | null;
   history: Array<{ eventType: string; detail: string; createdAt: string }>;
@@ -1611,32 +1630,350 @@ function LeadDetail({
             <LockKeyhole size={18} />
             <span>Private admin view. Contact details on this screen are never returned to customers or owners.</span>
           </div>
-          <div className="lead-people">
-            <div>
-              <span className="person-label">PROPERTY SEEKER</span>
-              <strong>{lead.customer.name || "Unnamed customer"}</strong>
-              <a href={lead.customer.phone ? `tel:${lead.customer.phone}` : undefined}>
-                <Phone size={15} />
-                {lead.customer.phone || "No number"}
-              </a>
-              <a href={lead.customer.email ? `mailto:${lead.customer.email}` : undefined}>
-                <Mail size={15} />
-                {lead.customer.email || "No email"}
-              </a>
-            </div>
-            <div>
-              <span className="person-label">PROPERTY OWNER</span>
-              <strong>{lead.owner.name || "Unnamed owner"}</strong>
-              <a href={lead.owner.phone ? `tel:${lead.owner.phone}` : undefined}>
-                <Phone size={15} />
-                {lead.owner.phone || "No number"}
-              </a>
-              <a href={lead.owner.email ? `mailto:${lead.owner.email}` : undefined}>
-                <Mail size={15} />
-                {lead.owner.email || "No email"}
-              </a>
-            </div>
-          </div>
+          {/* SECTION 1: HOMESEEKER VERIFIED LIVING PROFILE & REQUIREMENTS */}
+          {(() => {
+            const effectiveSeekerPhone = lead.confirmedPhone || lead.customer.phone || "";
+            const cleanDigits = effectiveSeekerPhone.replace(/\D/g, "").slice(-10);
+            return (
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "12px",
+                  padding: "16px",
+                  marginBottom: "18px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "12px",
+                    borderBottom: "1px solid #e2e8f0",
+                    paddingBottom: "8px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: "13px",
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      color: "#0f172a",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <UserCheck size={16} color="#059669" /> 1. Homeseeker Verified Profile &amp; Preferences
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      padding: "3px 8px",
+                      borderRadius: "4px",
+                      background: lead.confirmedPhone ? "#dcfce7" : "#fef3c7",
+                      color: lead.confirmedPhone ? "#15803d" : "#b45309",
+                    }}
+                  >
+                    {lead.confirmedPhone ? "Confirmed Contact" : "Contact Pending"}
+                  </span>
+                </div>
+
+                {/* Seeker Contact Info Card with Quick Action CTAs */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "14px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.5px" }}>
+                        Prospective Seeker Name
+                      </div>
+                      <strong style={{ fontSize: "15px", color: "var(--ink)", display: "block", marginTop: "2px" }}>
+                        {lead.customer.name || "Unnamed seeker"}
+                      </strong>
+                      {(lead.customer.city || lead.customer.location) && (
+                        <div style={{ fontSize: "11px", color: "var(--muted)", display: "flex", alignItems: "center", gap: "4px", marginTop: "3px" }}>
+                          <MapPin size={12} color="var(--brand)" />
+                          {[lead.customer.location, lead.customer.city].filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Confirmed Mobile Badge */}
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, display: "block" }}>
+                        CONFIRMED ACTIVE PHONE
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", justifyContent: "flex-end" }}>
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: "13px",
+                            fontWeight: 800,
+                            color: "#0f766e",
+                            background: "#ccfbf1",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                          }}
+                        >
+                          {effectiveSeekerPhone || "No number provided"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action buttons: Call, WhatsApp, Email, Copy */}
+                  <div style={{ display: "flex", gap: "8px", marginTop: "12px", paddingTop: "10px", borderTop: "1px solid #f1f5f9", flexWrap: "wrap" }}>
+                    {cleanDigits ? (
+                      <>
+                        <a
+                          href={`tel:${effectiveSeekerPhone}`}
+                          className="btn btn-outline"
+                          style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                        >
+                          <Phone size={13} /> Call Seeker
+                        </a>
+                        <a
+                          href={`https://wa.me/91${cleanDigits}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-outline"
+                          style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px", color: "#16a34a", borderColor: "#86efac" }}
+                        >
+                          <MessageCircle size={13} /> WhatsApp
+                        </a>
+                      </>
+                    ) : null}
+                    {lead.customer.email && (
+                      <a
+                        href={`mailto:${lead.customer.email}`}
+                        className="btn btn-outline"
+                        style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <Mail size={13} /> Email
+                      </a>
+                    )}
+                    {effectiveSeekerPhone && (
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(effectiveSeekerPhone);
+                          toast("Phone copied to clipboard");
+                        }}
+                        style={{ fontSize: "11px", padding: "6px 10px" }}
+                        title="Copy phone"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Formal Sequenced Profiling Specs Grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "11.5px" }}>
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <UsersRound size={13} color="var(--brand)" /> Occupants Count
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.occupantsCount || "Not specified"}
+                    </strong>
+                  </div>
+
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <Home size={13} color="var(--brand)" /> Tenant Type
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.tenantType || "Not specified"}
+                    </strong>
+                  </div>
+
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <Briefcase size={13} color="var(--brand)" /> Profession / Job
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.profession || "Not specified"}
+                    </strong>
+                  </div>
+
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <Users size={13} color="var(--brand)" /> Group / Gender
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.groupGender || "Not specified"}
+                    </strong>
+                  </div>
+
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <CalendarDays size={13} color="var(--brand)" /> Move-in Timeline
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.moveInTimeline || "Ready to move / Immediate"}
+                    </strong>
+                  </div>
+
+                  <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: "5px" }}>
+                      <Clock3 size={13} color="var(--brand)" /> Contact Time
+                    </span>
+                    <strong style={{ display: "block", fontSize: "13px", color: "#0f172a", marginTop: "4px" }}>
+                      {lead.preferredContactTime || "Anytime is fine"}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Special Notes or Requirements */}
+                {lead.seekerNotes && (
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      background: "#fffbeb",
+                      border: "1px solid #fde68a",
+                      borderRadius: "8px",
+                      padding: "10px 12px",
+                    }}
+                  >
+                    <span style={{ fontSize: "10px", color: "#b45309", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Homeseeker Special Notes / Requirements
+                    </span>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#92400e", lineHeight: "1.5" }}>
+                      &ldquo;{lead.seekerNotes}&rdquo;
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* SECTION 2: PROPERTY OWNER DETAILS & DIRECT COORDINATION */}
+          {(() => {
+            const ownerPhone = lead.owner.phone || "";
+            const cleanOwnerDigits = ownerPhone.replace(/\D/g, "").slice(-10);
+            return (
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "12px",
+                  padding: "16px",
+                  marginBottom: "18px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "12px",
+                    borderBottom: "1px solid #e2e8f0",
+                    paddingBottom: "8px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: "13px",
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      color: "#0f172a",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <KeyRound size={16} color="var(--brand)" /> 2. Property Owner Information
+                  </h3>
+                  <span style={{ fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", background: "#f1f5f9", color: "#475569" }}>
+                    Listing Owner
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.5px" }}>
+                      Owner Name
+                    </div>
+                    <strong style={{ fontSize: "14px", color: "var(--ink)", display: "block", marginTop: "2px" }}>
+                      {lead.owner.name || "Unnamed owner"}
+                    </strong>
+                    <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
+                      Owner of: {lead.property.title}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 700, display: "block" }}>
+                      OWNER PHONE
+                    </span>
+                    <span style={{ fontFamily: "monospace", fontSize: "12px", fontWeight: 700, color: "#334155" }}>
+                      {ownerPhone || "No phone"}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", marginTop: "10px", paddingTop: "10px", borderTop: "1px solid #f1f5f9", flexWrap: "wrap" }}>
+                  {cleanOwnerDigits ? (
+                    <>
+                      <a
+                        href={`tel:${ownerPhone}`}
+                        className="btn btn-outline"
+                        style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <Phone size={13} /> Call Owner
+                      </a>
+                      <a
+                        href={`https://wa.me/91${cleanOwnerDigits}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-outline"
+                        style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px", color: "#16a34a", borderColor: "#86efac" }}
+                      >
+                        <MessageCircle size={13} /> WhatsApp
+                      </a>
+                    </>
+                  ) : null}
+                  {lead.owner.email && (
+                    <a
+                      href={`mailto:${lead.owner.email}`}
+                      className="btn btn-outline"
+                      style={{ fontSize: "11px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <Mail size={13} /> Email
+                    </a>
+                  )}
+                  {ownerPhone && (
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(ownerPhone);
+                        toast("Owner phone copied to clipboard");
+                      }}
+                      style={{ fontSize: "11px", padding: "6px 10px" }}
+                      title="Copy owner phone"
+                    >
+                      <Copy size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
           <div className="lead-section">
             <h3>Status & internal notes</h3>
             <label className="form-label">LEAD STATUS</label>
@@ -2066,7 +2403,10 @@ export function AdminDashboardExperience() {
                         <span className="admin-row-avatar">{lead.customer.name?.charAt(0) || "?"}</span>
                         <span className="admin-row-person">
                           <strong>{lead.customer.name || "Property seeker"}</strong>
-                          <small>Interested in {lead.property.title}</small>
+                          <small>
+                            Interested in {lead.property.title}
+                            {lead.tenantType ? ` · ${lead.tenantType}` : ""}
+                          </small>
                         </span>
                         <span className={`status-pill status-${lead.status}`}>{lead.status.replaceAll("_", " ")}</span>
                         <span className="admin-row-date">{niceDate(lead.createdAt)}</span>
@@ -2349,7 +2689,12 @@ export function AdminDashboardExperience() {
                         </span>
                         <span className="admin-person-cell">
                           <strong>{lead.customer.name || "—"}</strong>
-                          <small>{lead.customer.phone || "No phone"}</small>
+                          <small>{lead.confirmedPhone || lead.customer.phone || "No phone"}</small>
+                          {(lead.tenantType || lead.occupantsCount) && (
+                            <span style={{ display: "inline-block", fontSize: "9px", background: "var(--brand-pale)", color: "var(--brand)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700, marginTop: "2px" }}>
+                              {[lead.tenantType, lead.occupantsCount].filter(Boolean).join(" · ")}
+                            </span>
+                          )}
                         </span>
                         <span className="admin-person-cell">
                           <strong>{lead.owner.name || "—"}</strong>
