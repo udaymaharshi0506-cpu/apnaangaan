@@ -10,6 +10,7 @@
     "test": "tsx --test tests/**/*.test.ts",
     "test:connections": "tsx scripts/test-connections.ts",
     "test:uploads": "tsx scripts/test-uploads.ts",
+    "db:secure": "tsx scripts/fix-supabase-rls.ts",
     "verify": "tsx scripts/verify-full-app.ts"
   },
   "dependencies": {

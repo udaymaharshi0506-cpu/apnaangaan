@@ -194,24 +194,53 @@ CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS uploaded_images_created_idx ON uploaded_images(created_at);
 
 
--- 4. Row Level Security — disabled (app handles auth in its own API layer)
+-- 4. Row Level Security — ENABLED (Security Hardened)
 -- ============================================================
+-- The Next.js application connects directly via DATABASE_URL using
+-- the postgres user, which bypasses RLS (rolbypassrls = true).
+-- Enabling RLS and revoking permissions from anon & authenticated
+-- prevents unauthorized access through Supabase PostgREST Data API.
 
-ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE properties DISABLE ROW LEVEL SECURITY;
-ALTER TABLE leads DISABLE ROW LEVEL SECURITY;
-ALTER TABLE meetings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;
-ALTER TABLE favorites DISABLE ROW LEVEL SECURITY;
-ALTER TABLE admin_call_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_events DISABLE ROW LEVEL SECURITY;
-ALTER TABLE saved_searches DISABLE ROW LEVEL SECURITY;
-ALTER TABLE otp_challenges DISABLE ROW LEVEL SECURITY;
-ALTER TABLE refresh_tokens DISABLE ROW LEVEL SECURITY;
-ALTER TABLE uploaded_images DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE properties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meetings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_call_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saved_searches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE otp_challenges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE refresh_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uploaded_images ENABLE ROW LEVEL SECURITY;
 
+-- Revoke direct internet access from PostgREST anonymous/authenticated roles
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon, authenticated;
+
+-- Explicitly grant full permissions to postgres (Next.js app) and service_role (Admin/Dashboard)
+GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, service_role;
+
+-- Hardening default privileges for any future tables created in public schema (October 30 readiness):
+-- Ensures new tables do not auto-expose to anon, and gives full rights to postgres & service_role
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  REVOKE ALL ON TABLES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  REVOKE ALL ON ROUTINES FROM anon, authenticated;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  GRANT ALL ON TABLES TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  GRANT ALL ON SEQUENCES TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public 
+  GRANT ALL ON ROUTINES TO postgres, service_role;
 
 -- 5. Done!
 -- ============================================================
--- Your database is ready. Now set DATABASE_URL in .env and run the app.
+-- Your database is fully secured and prepared for all future Supabase schema changes.
 

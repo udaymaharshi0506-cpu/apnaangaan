@@ -126,7 +126,7 @@ export function OwnerExperience() {
 }
 
 export function NotificationsExperience() {
-  const { user, loading, toast } = useApp();
+  const { user, loading, toast, refreshNotifications, markAllNotificationsRead, markNotificationRead } = useApp();
   const [items, setItems] = useState<Notice[]>([]);
   const [fetching, setFetching] = useState(true);
   const load = useCallback(async () => {
@@ -136,8 +136,14 @@ export function NotificationsExperience() {
     finally { setFetching(false); }
   }, [user]);
   useEffect(() => { void load(); }, [load]);
-  async function readAll() { try { await apiFetch("/api/notifications/read-all", { method: "PATCH" }); await load(); toast("All caught up!"); } catch { toast("Couldn't update notifications", "error"); } }
-  async function markRead(id: string) { await apiFetch(`/api/notifications/${id}`, { method: "PATCH" }).catch(() => null); setItems((old) => old.map((item) => item.id === id ? { ...item, isRead: true } : item)); }
+  async function readAll() {
+    await markAllNotificationsRead();
+    await load();
+  }
+  async function markRead(id: string) {
+    await markNotificationRead(id);
+    setItems((old) => old.map((item) => item.id === id ? { ...item, isRead: true } : item));
+  }
   if (!loading && !user) return <main className="member-page"><div className="container"><AccountGate title="Your updates live here." description="Log in to see property updates and coordinated viewing notifications." icon={Bell}/></div></main>;
   return <main className="member-page"><div className="container"><PageIntro eyebrow="STAY IN THE LOOP" title="Notifications" text="The things worth knowing, without the noise." action={items.some((item) => !item.isRead) ? <button onClick={() => void readAll()} className="btn btn-outline"><Check size={17}/> Mark all as read</button> : undefined}/>{fetching ? <div className="loading-cards">Loading updates...</div> : items.length ? <div className="notifications-list">{items.map((item) => <Link href={item.link || "/notifications"} key={item.id} onClick={() => void markRead(item.id)} className={`notification-row ${item.isRead ? "" : "unread"}`}><span className="notification-icon">{item.type === "meeting" ? <CalendarDays size={21}/> : item.type === "interest" ? <Heart size={21}/> : item.type === "listing" ? <Home size={21}/> : <Bell size={21}/>}</span><div><strong>{item.message}</strong><small>{niceDate(item.createdAt)}</small></div>{!item.isRead && <span className="unread-dot"/>}<ChevronRight size={17}/></Link>)}</div> : <EmptyState icon={Bell} title="All quiet for now" text="We&apos;ll let you know when there&apos;s an update on your places or inquiries." href="/search" cta="Keep exploring"/>}</div></main>;
 }

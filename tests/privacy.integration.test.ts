@@ -139,19 +139,7 @@ test("real route handlers keep seeker and owner contact details separated", asyn
 
   const { pool } = await import("../src/db/index");
   await pool.query(`
-    TRUNCATE TABLE 
-      refresh_tokens,
-      otp_challenges,
-      saved_searches,
-      lead_events,
-      admin_call_logs,
-      favorites,
-      notifications,
-      meetings,
-      leads,
-      properties,
-      users
-    RESTART IDENTITY CASCADE;
+    DELETE FROM users WHERE phone IN ('+919876543210', '+919876543211') OR email IN ('rohan@example.com', 'ananya@example.com');
   `);
   await pool.end();
 });

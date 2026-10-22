@@ -465,9 +465,8 @@ export function PostPropertyExperience() {
       const cleanArea = Math.round(Number(String(form.areaSqft).replace(/,/g, ""))) || 0;
       const cleanMaintenance = form.maintenanceStatus === "separate" ? Math.round(Number(String(form.maintenanceAmount).replace(/,/g, ""))) : null;
 
-      // Auto-generated clear title & description (no manual typing required from user)
       const autoTitle = `${form.bhkOrRoomType} ${form.propertyType} in ${form.locality || form.landmark || form.city}`;
-      const autoDescription = `${form.bhkOrRoomType} ${form.propertyType} with ${cleanArea} sq ft located in ${form.locality || form.city}. Floor: ${form.floor || "1"} of ${form.totalFloors || "4"}, Facing: ${form.facing}, Furnishing: ${form.furnishingStatus}. ${form.landmark ? `Landmark: ${form.landmark}.` : ""}`;
+      const autoDescription = `${form.bhkOrRoomType} ${form.propertyType} featuring ${cleanArea} sq ft of space in ${form.locality || form.city}. Floor ${form.floor || "1"} of ${form.totalFloors || "4"}, ${form.facing} facing, ${form.furnishingStatus}. ${form.landmark ? `Landmark: ${form.landmark}.` : ""}`.trim();
 
       const payload = {
         category: form.category,

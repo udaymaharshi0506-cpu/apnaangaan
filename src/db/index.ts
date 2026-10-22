@@ -29,8 +29,8 @@ export const pool =
   new Pool({
     connectionString: cleanDatabaseUrl,
     ssl: isHostedPg ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 6000,
-    idleTimeoutMillis: 3000,
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 30000,
     max: isHostedPg ? 3 : 10,
   });
 

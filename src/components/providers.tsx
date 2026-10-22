@@ -6,6 +6,16 @@ import { CheckCircle2, Info, X } from "lucide-react";
 
 export type SessionUser = { id: string; phone: string | null; email: string | null; name: string | null; city?: string | null; location?: string | null; role: string; roles: Array<"customer" | "owner" | "admin">; consentAt: string | null; needsOnboarding: boolean };
 
+export type NotificationItem = {
+  id: string;
+  userId: string;
+  type: string;
+  message: string;
+  link: string | null;
+  isRead: boolean;
+  createdAt: string;
+};
+
 export async function apiFetch<T = Record<string, unknown>>(url: string, options: RequestInit = {}, retry = true): Promise<T> {
   let response: Response;
   try {
@@ -52,6 +62,11 @@ type AppContextValue = {
   toggleFavorite: (id: string) => Promise<void>;
   refreshFavorites: () => Promise<void>;
   toast: (message: string, kind?: "success" | "info" | "error") => void;
+  unreadCount: number;
+  recentNotifications: NotificationItem[];
+  refreshNotifications: () => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -101,6 +116,9 @@ export function AppProviders({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [recentNotifications, setRecentNotifications] = useState<NotificationItem[]>([]);
+
   const refreshFavorites = useCallback(async () => {
     if (!user) { setSavedIds(new Set()); return; }
     try {
@@ -109,6 +127,75 @@ export function AppProviders({ children }: { children: ReactNode }) {
     } catch { setSavedIds(new Set()); }
   }, [user]);
   useEffect(() => { void refreshFavorites(); }, [refreshFavorites]);
+
+  const refreshNotifications = useCallback(async () => {
+    if (!user) {
+      setUnreadCount(0);
+      setRecentNotifications([]);
+      return;
+    }
+    try {
+      const data = await apiFetch<{ items: NotificationItem[]; unread: number }>("/api/notifications?page=1");
+      if (typeof data.unread === "number") {
+        setUnreadCount(data.unread);
+      }
+      if (Array.isArray(data.items)) {
+        setRecentNotifications(data.items.slice(0, 6));
+      }
+    } catch {
+      // Maintain state on network blip
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void refreshNotifications();
+  }, [refreshNotifications]);
+
+  // Real-time polling & window focus listeners to ensure notifications update automatically
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      void refreshNotifications();
+    }, 12000);
+
+    const onFocus = () => {
+      void refreshNotifications();
+    };
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [user, refreshNotifications]);
+
+  // Refresh count on page transitions
+  useEffect(() => {
+    if (user) {
+      void refreshNotifications();
+    }
+  }, [pathname, user, refreshNotifications]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    try {
+      await apiFetch("/api/notifications/read-all", { method: "PATCH" });
+      setUnreadCount(0);
+      setRecentNotifications((prev) => prev.map((item) => ({ ...item, isRead: true })));
+      toast("All caught up!");
+    } catch (error) {
+      toast("Couldn't update notifications", "error");
+    }
+  }, [toast]);
+
+  const markNotificationRead = useCallback(async (id: string) => {
+    try {
+      await apiFetch(`/api/notifications/${id}`, { method: "PATCH" });
+      setUnreadCount((c) => Math.max(0, c - 1));
+      setRecentNotifications((prev) => prev.map((item) => (item.id === id ? { ...item, isRead: true } : item)));
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   const toggleFavorite = useCallback(async (id: string) => {
     if (!user) { router.push(`/login?next=${encodeURIComponent(pathname || "/")}`); return; }
@@ -127,11 +214,45 @@ export function AppProviders({ children }: { children: ReactNode }) {
     await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     setUser(null);
     setSavedIds(new Set());
+    setUnreadCount(0);
+    setRecentNotifications([]);
     router.push("/");
     router.refresh();
     toast("You've been signed out", "info");
   }, [router, toast]);
 
-  const value = useMemo(() => ({ user, loading, refreshUser, logout, theme, toggleTheme, savedIds, toggleFavorite, refreshFavorites, toast }), [user, loading, refreshUser, logout, theme, toggleTheme, savedIds, toggleFavorite, refreshFavorites, toast]);
+  const value = useMemo(() => ({
+    user,
+    loading,
+    refreshUser,
+    logout,
+    theme,
+    toggleTheme,
+    savedIds,
+    toggleFavorite,
+    refreshFavorites,
+    toast,
+    unreadCount,
+    recentNotifications,
+    refreshNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
+  }), [
+    user,
+    loading,
+    refreshUser,
+    logout,
+    theme,
+    toggleTheme,
+    savedIds,
+    toggleFavorite,
+    refreshFavorites,
+    toast,
+    unreadCount,
+    recentNotifications,
+    refreshNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
+  ]);
   return <AppContext.Provider value={value}>{children}{notice && <div className={`app-toast ${notice.kind}`} role="status">{notice.kind === "success" ? <CheckCircle2 size={19} /> : <Info size={19} />}<span>{notice.message}</span><button aria-label="Dismiss" onClick={() => setNotice(null)}><X size={17} /></button></div>}</AppContext.Provider>;
 }

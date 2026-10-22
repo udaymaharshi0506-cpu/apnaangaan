@@ -49,7 +49,11 @@ async function latestMeeting(leadId: string) {
   return meeting || null;
 }
 async function sendNotification(userId: string, type: string, message: string, link?: string) {
-  await db.insert(notifications).values({ userId, type, message, link });
+  try {
+    await db.insert(notifications).values({ userId, type, message, link });
+  } catch (err) {
+    console.error("Failed to insert notification:", err);
+  }
 }
 
 const phoneSchema = z.object({ phone: z.string().regex(/^\+91[6-9]\d{9}$/, "Enter a valid Indian mobile number.") });
@@ -498,9 +502,12 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           rejectionReason: null,
           updatedAt: new Date(),
         }).where(eq(properties.id, existing.id)).returning();
+        await sendNotification(user.id, "listing", `Your listing "${updated.title}" was resubmitted for verification.`, "/owner");
         return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Listing resubmitted for verification." });
       }
       const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
+      const statusLabel = input.status === "live" ? "is now live" : input.status === "paused" ? "is now paused" : `has been marked as ${input.status}`;
+      await sendNotification(user.id, "listing", `Your listing "${updated.title}" ${statusLabel}.`, "/owner");
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
     const { status: _ignoredStatus, availabilityDate, possessionDate, itemizedCharges, ...changes } = input;
@@ -1123,7 +1130,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const roleFilter = params.get("role");
       const q = params.get("q")?.trim();
       const page = pageFrom(request);
-      const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
+      const limit = Math.min(2000, Math.max(1, Number(params.get("limit")) || 50));
 
       const conditions: any[] = [];
       if (roleFilter === "owner") {
@@ -1156,6 +1163,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
             role: users.role,
             roles: users.roles,
             consentAt: users.consentAt,
+            otpVerifiedAt: users.otpVerifiedAt,
             createdAt: users.createdAt,
             updatedAt: users.updatedAt,
           })
@@ -1203,6 +1211,71 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       });
 
       return respond({ items, total, page, pages: Math.ceil(total / limit) });
+    }
+
+    if (segments[0] === "admin" && segments[1] === "users" && segments.length === 3 && method === "GET") {
+      const id = segments[2];
+      const [u] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      if (!u) fail(404, "User not found.");
+
+      const [userProps, userLeads] = await Promise.all([
+        db
+          .select({
+            id: properties.id,
+            title: properties.title,
+            category: properties.category,
+            propertyType: properties.propertyType,
+            price: properties.price,
+            status: properties.status,
+            verified: properties.verified,
+            city: properties.city,
+            locality: properties.locality,
+            createdAt: properties.createdAt,
+          })
+          .from(properties)
+          .where(eq(properties.ownerId, id))
+          .orderBy(desc(properties.createdAt)),
+        db
+          .select({
+            id: leads.id,
+            propertyId: leads.propertyId,
+            status: leads.status,
+            createdAt: leads.createdAt,
+            propertyTitle: properties.title,
+            propertyCategory: properties.category,
+            propertyCity: properties.city,
+          })
+          .from(leads)
+          .innerJoin(properties, eq(leads.propertyId, properties.id))
+          .where(eq(leads.customerId, id))
+          .orderBy(desc(leads.createdAt)),
+      ]);
+
+      const isAdmin = u.roles.includes("admin") || u.role === "admin";
+      const isOwner = !isAdmin && u.roles.includes("owner");
+
+      return respond({
+        user: {
+          id: u.id,
+          name: u.name,
+          phone: u.phone,
+          email: u.email,
+          city: u.city,
+          location: u.location,
+          role: u.role,
+          roles: u.roles,
+          consentAt: u.consentAt,
+          otpVerifiedAt: u.otpVerifiedAt,
+          createdAt: u.createdAt,
+          updatedAt: u.updatedAt,
+          category: isAdmin ? "admin" : isOwner ? "owner" : "customer",
+          categoryLabel: isAdmin ? "Platform Admin" : isOwner ? "Owner / Rent" : "Home Seeker",
+          listingsCount: userProps.length,
+          inquiriesCount: userLeads.length,
+        },
+        properties: userProps,
+        inquiries: userLeads,
+      });
     }
 
     if (route === "admin/dashboard/stats" && method === "GET") {

@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Clock3,
   Copy,
+  Download,
   ExternalLink,
   Eye,
   FileCheck2,
@@ -67,7 +68,9 @@ export type AdminUser = {
   category: "customer" | "owner" | "admin";
   categoryLabel: string;
   consentAt: string | null;
+  otpVerifiedAt?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
   listingsCount: number;
   inquiriesCount: number;
 };
@@ -595,6 +598,432 @@ export function RejectReasonModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+export function UserDetailModal({
+  user,
+  onClose,
+}: {
+  user: AdminUser;
+  onClose: () => void;
+}) {
+  const { toast } = useApp();
+  const [details, setDetails] = useState<{
+    user: AdminUser;
+    properties: Array<{
+      id: string;
+      title: string;
+      category: string;
+      propertyType: string;
+      price: number;
+      status: string;
+      verified: boolean;
+      city: string;
+      locality: string;
+      createdAt: string;
+    }>;
+    inquiries: Array<{
+      id: string;
+      propertyId: string;
+      propertyTitle: string;
+      propertyCategory: string;
+      propertyCity: string;
+      status: string;
+      createdAt: string;
+    }>;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchUserDetails() {
+      try {
+        const data = await apiFetch<{
+          user: AdminUser;
+          properties: any[];
+          inquiries: any[];
+        }>(`/api/admin/users/${user.id}`);
+        setDetails(data);
+      } catch {
+        setDetails({ user, properties: [], inquiries: [] });
+      } finally {
+        setLoading(false);
+      }
+    }
+    void fetchUserDetails();
+  }, [user]);
+
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    toast("Copied to clipboard!");
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const currentUser = details?.user || user;
+  const isAdmin = currentUser.roles.includes("admin") || currentUser.role === "admin";
+  const isOwner = !isAdmin && currentUser.roles.includes("owner");
+  const cleanPhone = currentUser.phone ? currentUser.phone.replace(/[\s\-\(\)]/g, "") : null;
+  const formattedPhone = cleanPhone
+    ? cleanPhone.startsWith("+")
+      ? cleanPhone
+      : `+91 ${cleanPhone.slice(-10)}`
+    : null;
+  const whatsappNumber = cleanPhone ? cleanPhone.replace(/\D/g, "") : null;
+
+  return (
+    <div className="admin-modal-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div
+        className="admin-modal-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: "680px",
+          width: "95%",
+          maxHeight: "90vh",
+          overflowY: "auto",
+          padding: "24px",
+          borderRadius: "16px",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "20px", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                background: isAdmin ? "#164f4c" : isOwner ? "#fff0dc" : "#e0f2fe",
+                color: isAdmin ? "#ffffff" : isOwner ? "#b47740" : "#0369a1",
+                display: "grid",
+                placeItems: "center",
+                fontWeight: 800,
+                fontSize: "18px",
+                flexShrink: 0,
+              }}
+            >
+              {currentUser.name?.charAt(0).toUpperCase() || (isAdmin ? "A" : isOwner ? "O" : "S")}
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <h2 style={{ fontSize: "17px", fontWeight: 800, margin: 0, color: "var(--ink)" }}>
+                  {currentUser.name || "Registered User"}
+                </h2>
+                <span
+                  className="status-pill"
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    background: isAdmin ? "#f1f5f9" : isOwner ? "#fff0dc" : "#e0f2fe",
+                    color: isAdmin ? "#0f172a" : isOwner ? "#92400e" : "#0369a1",
+                    border: isAdmin ? "1px solid #cbd5e1" : "none",
+                  }}
+                >
+                  {isAdmin ? <ShieldCheck size={11} /> : isOwner ? <KeyRound size={11} /> : <Home size={11} />}
+                  {currentUser.categoryLabel}
+                </span>
+              </div>
+              <small style={{ fontSize: "11px", color: "var(--muted)", display: "block", marginTop: "3px" }}>
+                User ID: {currentUser.id}
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(currentUser.id, "userId")}
+                  style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "6px", color: "var(--brand)" }}
+                  title="Copy User ID"
+                >
+                  {copiedKey === "userId" ? <Check size={11} /> : <Copy size={11} />}
+                </button>
+              </small>
+            </div>
+          </div>
+          <button onClick={onClose} className="admin-modal-close" style={{ background: "var(--surface-muted)", border: "none", borderRadius: "50%", width: "32px", height: "32px", display: "grid", placeItems: "center", cursor: "pointer" }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Contact & Communication Box */}
+        <div style={{ background: "var(--surface-tint)", borderRadius: "12px", border: "1px solid var(--border)", padding: "16px", marginBottom: "16px" }}>
+          <h4 style={{ margin: "0 0 12px 0", fontSize: "12px", letterSpacing: "0.5px", textTransform: "uppercase", color: "var(--muted)", fontWeight: 800 }}>
+            Contact & Communication
+          </h4>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            {/* Phone */}
+            <div style={{ background: "var(--surface)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+              <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                PHONE NUMBER
+              </span>
+              {formattedPhone ? (
+                <>
+                  <strong style={{ fontSize: "13px", color: "var(--ink)", display: "block", marginBottom: "8px" }}>
+                    {formattedPhone}
+                  </strong>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    <a
+                      href={`tel:${formattedPhone.replace(/\s+/g, "")}`}
+                      style={{
+                        background: "var(--brand-pale)",
+                        color: "var(--brand)",
+                        padding: "5px 9px",
+                        borderRadius: "5px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        textDecoration: "none",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <Phone size={12} /> Call
+                    </a>
+                    {whatsappNumber && (
+                      <a
+                        href={`https://wa.me/${whatsappNumber}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          background: "#dcfce7",
+                          color: "#166534",
+                          padding: "5px 9px",
+                          borderRadius: "5px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <MessageSquare size={12} /> WhatsApp
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(formattedPhone, "phone")}
+                      style={{
+                        background: "var(--surface-muted)",
+                        color: "var(--ink-soft)",
+                        padding: "5px 8px",
+                        borderRadius: "5px",
+                        border: "none",
+                        fontSize: "11px",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
+                      }}
+                      title="Copy Phone"
+                    >
+                      {copiedKey === "phone" ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <span style={{ fontSize: "12px", color: "var(--muted)", fontStyle: "italic" }}>No phone provided</span>
+              )}
+            </div>
+
+            {/* Email */}
+            <div style={{ background: "var(--surface)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+              <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                EMAIL ADDRESS
+              </span>
+              {currentUser.email ? (
+                <>
+                  <strong style={{ fontSize: "13px", color: "var(--ink)", display: "block", marginBottom: "8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {currentUser.email}
+                  </strong>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <a
+                      href={`mailto:${currentUser.email}`}
+                      style={{
+                        background: "var(--surface-muted)",
+                        color: "var(--brand)",
+                        padding: "5px 9px",
+                        borderRadius: "5px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        textDecoration: "none",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <Mail size={12} /> Email
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(currentUser.email!, "email")}
+                      style={{
+                        background: "var(--surface-muted)",
+                        color: "var(--ink-soft)",
+                        padding: "5px 8px",
+                        borderRadius: "5px",
+                        border: "none",
+                        fontSize: "11px",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
+                      }}
+                      title="Copy Email"
+                    >
+                      {copiedKey === "email" ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <span style={{ fontSize: "12px", color: "var(--muted)", fontStyle: "italic" }}>No email provided</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Location & Account Metadata Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+          {/* Location Box */}
+          <div style={{ background: "var(--surface)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+              CITY & LOCATION
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>
+              <MapPin size={15} color="var(--brand)" />
+              {currentUser.location || currentUser.city || "Not provided"}
+            </div>
+            {currentUser.city && currentUser.location && currentUser.city !== currentUser.location && (
+              <small style={{ fontSize: "11px", color: "var(--muted)", display: "block", marginTop: "4px" }}>
+                City: {currentUser.city}
+              </small>
+            )}
+          </div>
+
+          {/* Account Status Box */}
+          <div style={{ background: "var(--surface)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+              REGISTRATION & CONSENT
+            </span>
+            <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>
+              Registered: <strong>{new Date(currentUser.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong>
+            </div>
+            {currentUser.consentAt ? (
+              <div style={{ fontSize: "11.5px", color: "#16a34a", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px", marginTop: "4px" }}>
+                <CheckCircle2 size={13} /> Terms Accepted ({new Date(currentUser.consentAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })})
+              </div>
+            ) : (
+              <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>Consent pending</div>
+            )}
+            {currentUser.otpVerifiedAt && (
+              <div style={{ fontSize: "11px", color: "var(--brand)", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
+                <ShieldCheck size={12} /> OTP Verified ({new Date(currentUser.otpVerifiedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })})
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* User Activities / Items */}
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "20px", color: "var(--muted)", fontSize: "12px" }}>
+            Loading user properties and inquiry history...
+          </div>
+        ) : (
+          <>
+            {/* Properties Posted (if any) */}
+            {details && details.properties.length > 0 && (
+              <div style={{ marginTop: "16px" }}>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "13px", fontWeight: 800, color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Home size={15} color="var(--brand)" />
+                  Properties Posted ({details.properties.length})
+                </h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {details.properties.map((p) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        background: "var(--surface-tint)",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: "12px", color: "var(--ink)", display: "block" }}>{p.title}</strong>
+                        <small style={{ fontSize: "10px", color: "var(--muted)" }}>
+                          {(categoryLabel[p.category] || p.category)} · {p.city || p.locality} · {formatPrice(p.price, p.category)}
+                        </small>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span className={`status-pill status-${p.status}`} style={{ fontSize: "9px" }}>
+                          {p.status.replace("_", " ")}
+                        </span>
+                        <Link
+                          href={`/property/${p.id}`}
+                          target="_blank"
+                          style={{ color: "var(--brand)", display: "flex", alignItems: "center", padding: "4px" }}
+                          title="Open property page"
+                        >
+                          <ExternalLink size={14} />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Inquiries Submitted (if any) */}
+            {details && details.inquiries.length > 0 && (
+              <div style={{ marginTop: "16px" }}>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "13px", fontWeight: 800, color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <MessageSquare size={15} color="var(--brand)" />
+                  Inquiries Submitted ({details.inquiries.length})
+                </h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {details.inquiries.map((inq) => (
+                    <div
+                      key={inq.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        background: "var(--surface-tint)",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: "12px", color: "var(--ink)", display: "block" }}>
+                          {inq.propertyTitle}
+                        </strong>
+                        <small style={{ fontSize: "10px", color: "var(--muted)" }}>
+                          Inquired on {new Date(inq.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        </small>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span className={`status-pill status-${inq.status}`} style={{ fontSize: "9px" }}>
+                          {inq.status.replace("_", " ")}
+                        </span>
+                        <Link
+                          href={`/property/${inq.propertyId}`}
+                          target="_blank"
+                          style={{ color: "var(--brand)", display: "flex", alignItems: "center", padding: "4px" }}
+                          title="Open property page"
+                        >
+                          <ExternalLink size={14} />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -2076,6 +2505,62 @@ function LeadDetail({
   );
 }
 
+function exportUsersToCSV(userList: AdminUser[]) {
+  if (!userList.length) return;
+  const headers = [
+    "User ID",
+    "Full Name",
+    "Phone Number",
+    "Email Address",
+    "Role / Category",
+    "City",
+    "Location / Landmark",
+    "Registration Date",
+    "OTP Verified Date",
+    "Consent Timestamp",
+    "Listings Posted",
+    "Inquiries Submitted",
+  ];
+
+  const escapeCSV = (val: string | number | null | undefined) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const rows = userList.map((u) => {
+    const regDate = u.createdAt ? new Date(u.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "";
+    const otpDate = u.otpVerifiedAt ? new Date(u.otpVerifiedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "";
+    const consentDate = u.consentAt ? new Date(u.consentAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "";
+
+    return [
+      escapeCSV(u.id),
+      escapeCSV(u.name || "N/A"),
+      escapeCSV(u.phone || "N/A"),
+      escapeCSV(u.email || "N/A"),
+      escapeCSV(u.categoryLabel || u.role),
+      escapeCSV(u.city || "N/A"),
+      escapeCSV(u.location || "N/A"),
+      escapeCSV(regDate),
+      escapeCSV(otpDate),
+      escapeCSV(consentDate),
+      escapeCSV(u.listingsCount || 0),
+      escapeCSV(u.inquiriesCount || 0),
+    ].join(",");
+  });
+
+  const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `aangan_registered_users_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export function AdminDashboardExperience() {
   const router = useRouter();
   const { user, logout, toast } = useApp();
@@ -2090,7 +2575,32 @@ export function AdminDashboardExperience() {
   const [selectedLead, setSelectedLead] = useState<AdminLead | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<ModeratedProperty | null>(null);
   const [rejectingProperty, setRejectingProperty] = useState<ModeratedProperty | null>(null);
+  const [selectedAdminUser, setSelectedAdminUser] = useState<AdminUser | null>(null);
+  const [exportingCSV, setExportingCSV] = useState(false);
   const [busyQuickModerate, setBusyQuickModerate] = useState(false);
+
+  const handleExportCSV = async () => {
+    try {
+      setExportingCSV(true);
+      const data = await apiFetch<{ items: AdminUser[]; total: number }>("/api/admin/users?limit=2000");
+      const listToExport = data.items?.length ? data.items : users;
+      if (!listToExport.length) {
+        toast("No users available to export.", "error");
+        return;
+      }
+      exportUsersToCSV(listToExport);
+      toast(`Exported ${listToExport.length} user records to CSV`);
+    } catch {
+      if (!users.length) {
+        toast("No users available to export.", "error");
+        return;
+      }
+      exportUsersToCSV(users);
+      toast(`Exported ${users.length} user records to CSV`);
+    } finally {
+      setExportingCSV(false);
+    }
+  };
 
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
@@ -2724,10 +3234,35 @@ export function AdminDashboardExperience() {
                   <h1>Registered Users</h1>
                   <p>All registered Home Seekers and Property Owners with verified contact numbers.</p>
                 </div>
-                <span className="admin-date">
-                  <UsersRound size={17} />
-                  {stats?.totalUsers || totalUsers} accounts registered
-                </span>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={handleExportCSV}
+                    disabled={exportingCSV || loadingUsers}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "8px 14px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      borderRadius: "8px",
+                      background: "var(--brand-pale)",
+                      color: "var(--brand)",
+                      border: "1px solid var(--brand)",
+                      cursor: exportingCSV ? "not-allowed" : "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                    title="Export all registered users to a spreadsheet CSV"
+                  >
+                    <Download size={14} />
+                    {exportingCSV ? "Exporting CSV..." : "Export All CSV"}
+                  </button>
+                  <span className="admin-date">
+                    <UsersRound size={17} />
+                    {stats?.totalUsers || totalUsers} accounts registered
+                  </span>
+                </div>
               </div>
 
               {/* Category selector pills & search */}
@@ -2838,7 +3373,7 @@ export function AdminDashboardExperience() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 90px",
+                        gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 140px",
                         gap: "10px",
                         alignItems: "center",
                         padding: "12px 20px",
@@ -2874,14 +3409,16 @@ export function AdminDashboardExperience() {
                         <div
                           key={u.id}
                           className="admin-prop-row"
+                          onClick={() => setSelectedAdminUser(u)}
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 90px",
+                            gridTemplateColumns: "1.7fr 1fr 1.1fr 1.3fr 1fr 1fr 140px",
                             gap: "10px",
                             alignItems: "center",
                             padding: "12px 20px",
                             borderBottom: "1px solid #edf0eb",
                             transition: "background 0.15s ease",
+                            cursor: "pointer",
                           }}
                         >
                           {/* Name / User */}
@@ -3043,10 +3580,37 @@ export function AdminDashboardExperience() {
                           </div>
 
                           {/* Actions */}
-                          <div style={{ textAlign: "right", display: "flex", justifyContent: "flex-end", gap: "5px" }}>
+                          <div
+                            style={{ textAlign: "right", display: "flex", justifyContent: "flex-end", gap: "5px" }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAdminUser(u);
+                              }}
+                              style={{
+                                background: "var(--brand)",
+                                color: "#ffffff",
+                                border: "none",
+                                padding: "5px 8px",
+                                borderRadius: "5px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                              title="View full user profile, listings, and inquiries"
+                            >
+                              <Eye size={11} /> View
+                            </button>
                             {formattedPhone && (
                               <a
                                 href={`tel:${formattedPhone.replace(/\s+/g, "")}`}
+                                onClick={(e) => e.stopPropagation()}
                                 style={{
                                   background: "var(--brand-pale)",
                                   color: "var(--brand)",
@@ -3067,6 +3631,7 @@ export function AdminDashboardExperience() {
                             {u.email && (
                               <a
                                 href={`mailto:${u.email}`}
+                                onClick={(e) => e.stopPropagation()}
                                 style={{
                                   background: "var(--surface-muted)",
                                   color: "var(--ink-soft)",
@@ -3214,6 +3779,14 @@ export function AdminDashboardExperience() {
       {/* Lead CRM Detail Drawer */}
       {selectedLead && (
         <LeadDetail lead={selectedLead} onClose={() => setSelectedLead(null)} onRefresh={load} />
+      )}
+
+      {/* User Full Profile Detail Modal */}
+      {selectedAdminUser && (
+        <UserDetailModal
+          user={selectedAdminUser}
+          onClose={() => setSelectedAdminUser(null)}
+        />
       )}
     </main>
   );

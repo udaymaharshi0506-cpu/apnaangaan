@@ -2,9 +2,24 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight } from "lucide-react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
+
+function formatRelativeTime(dateString: string) {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+    if (diffSec < 60) return "Just now";
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
+    return date.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
 
 export function Brand({ light = false }: { light?: boolean }) {
   return <Link href="/" aria-label="Aangan home" className={`brand ${light ? "brand-light" : ""}`}>
@@ -23,12 +38,36 @@ const navLinks = [
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, theme, toggleTheme } = useApp();
+  const { user, loading, theme, toggleTheme, unreadCount, recentNotifications, markAllNotificationsRead, markNotificationRead } = useApp();
   const [locationOpen, setLocationOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
   const [city, setCity] = useState("Bengaluru");
   const isAdmin = pathname.startsWith("/admin");
   const isPropertyDetail = pathname.startsWith("/property/");
   const isAuth = ["/login", "/signup", "/setup", "/welcome"].includes(pathname);
+
+  // Close notifications popover on click outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent | TouchEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    }
+    if (notificationsOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("touchstart", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, [notificationsOpen]);
+
+  // Close notifications popover on route change
+  useEffect(() => {
+    setNotificationsOpen(false);
+  }, [pathname]);
 
   // Global Route Guard: prevent users who haven't completed onboarding from bypassing /setup
   useEffect(() => {
@@ -86,7 +125,99 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </div>
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}>{theme === "light" ? <Moon size={19} strokeWidth={1.8}/> : <Sun size={19} strokeWidth={1.8}/>}</button>
           {isUserCustomer && <Link href="/saved" className="icon-button header-icon-link" aria-label="Saved homes" title="Saved homes"><Heart size={19} strokeWidth={1.8}/></Link>}
-          {user && <Link href="/notifications" className="icon-button header-icon-link" aria-label="Notifications"><Bell size={19} strokeWidth={1.8}/></Link>}
+          {user && (
+            <div className="header-notifications-wrap" ref={notifRef}>
+              <button
+                type="button"
+                className={`icon-button bell-button ${notificationsOpen ? "active" : ""}`}
+                onClick={() => setNotificationsOpen((v) => !v)}
+                aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+                aria-haspopup="dialog"
+                aria-expanded={notificationsOpen}
+                title={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+              >
+                <Bell size={19} strokeWidth={1.8} />
+                {unreadCount > 0 && (
+                  <span className="bell-badge" aria-hidden="true">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="notifications-popover" role="dialog" aria-label="Notifications preview">
+                  <div className="notifications-popover-header">
+                    <div className="popover-title-row">
+                      <h4>Notifications</h4>
+                      {unreadCount > 0 ? (
+                        <span className="popover-unread-pill">{unreadCount} new</span>
+                      ) : (
+                        <span className="popover-all-read-pill">All caught up</span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        className="mark-all-btn"
+                        onClick={() => void markAllNotificationsRead()}
+                        title="Mark all as read"
+                      >
+                        <Check size={13} strokeWidth={2.4} />
+                        <span>Mark read</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="notifications-popover-body">
+                    {recentNotifications.length === 0 ? (
+                      <div className="notifications-empty">
+                        <Bell size={26} strokeWidth={1.5} className="empty-bell-icon" />
+                        <p>No notifications yet</p>
+                        <span>Updates on your inquiries, spaces, and viewings will appear here.</span>
+                      </div>
+                    ) : (
+                      <div className="notifications-items-list">
+                        {recentNotifications.map((item) => {
+                          const IconComp = item.type === "meeting" ? CalendarDays : item.type === "interest" ? Heart : item.type === "listing" ? Home : Bell;
+                          return (
+                            <Link
+                              key={item.id}
+                              href={item.link || "/notifications"}
+                              className={`popover-notif-item ${item.isRead ? "read" : "unread"}`}
+                              onClick={() => {
+                                if (!item.isRead) void markNotificationRead(item.id);
+                                setNotificationsOpen(false);
+                              }}
+                            >
+                              <span className={`popover-notif-icon notif-type-${item.type}`}>
+                                <IconComp size={15} />
+                              </span>
+                              <div className="popover-notif-content">
+                                <p className="popover-notif-text">{item.message}</p>
+                                <span className="popover-notif-time">{formatRelativeTime(item.createdAt)}</span>
+                              </div>
+                              {!item.isRead && <span className="popover-unread-dot" aria-label="Unread" />}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="notifications-popover-footer">
+                    <Link
+                      href="/notifications"
+                      className="view-all-link"
+                      onClick={() => setNotificationsOpen(false)}
+                    >
+                      <span>View all updates</span>
+                      <ArrowRight size={14} />
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <Link href={user ? "/profile" : "/login"} className="header-signin"><UserRound size={18} strokeWidth={1.8}/><span>{user ? user.name?.split(" ")[0] || "Profile" : "Log in"}</span></Link>
           {!user && <Link href="/signup" className="header-signup-link"><span>Sign up</span></Link>}
           {isUserAdmin ? (
@@ -110,7 +241,18 @@ export function SiteShell({ children }: { children: ReactNode }) {
     </div><div className="container footer-bottom"><span>© {new Date().getFullYear()} Aangan. Made for the place you call home.</span><span>Thoughtfully built for India <span className="footer-heart">♥</span></span></div></footer>}
     {!isPropertyDetail && !isAuth && (
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
-        {mobileTabs.map(({ label, href, Icon }) => <Link key={label} href={href} className={`tab-item ${pathname === href ? "active" : ""}`}><Icon size={21} strokeWidth={pathname === href ? 2.3 : 1.8}/><span>{label}</span></Link>)}
+        {mobileTabs.map(({ label, href, Icon }) => {
+          const hasBadge = href === "/notifications" && unreadCount > 0;
+          return (
+            <Link key={label} href={href} className={`tab-item ${pathname === href ? "active" : ""}`}>
+              <span className="tab-icon-wrap" style={{ position: "relative", display: "inline-flex" }}>
+                <Icon size={21} strokeWidth={pathname === href ? 2.3 : 1.8}/>
+                {hasBadge && <span className="tab-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+              </span>
+              <span>{label}</span>
+            </Link>
+          );
+        })}
       </nav>
     )}
   </>;

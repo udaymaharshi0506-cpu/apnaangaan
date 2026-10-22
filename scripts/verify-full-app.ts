@@ -184,21 +184,8 @@ async function runEndToEndVerification() {
     console.error("Test execution error:", err);
     record("Full Test Suite Execution", false, err.message);
   } finally {
-    // Clean all data to keep database 100% empty
     await pool.query(`
-      TRUNCATE TABLE 
-        refresh_tokens,
-        otp_challenges,
-        saved_searches,
-        lead_events,
-        admin_call_logs,
-        favorites,
-        notifications,
-        meetings,
-        leads,
-        properties,
-        users
-      RESTART IDENTITY CASCADE;
+      DELETE FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com');
     `);
     await pool.end();
   }

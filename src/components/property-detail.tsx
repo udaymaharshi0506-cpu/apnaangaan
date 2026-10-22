@@ -3,11 +3,45 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bath, BedDouble, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, Clock3, Copy, Heart, Home, Image as ImageIcon, KeyRound, LockKeyhole, MapPin, Maximize2, ShieldCheck, Sparkles, Trees, UtensilsCrossed, WashingMachine, Wifi, X, Zap, Building2, Wind, Users, Briefcase, Calendar, Phone, CheckCircle2, AlertCircle, MessageSquareQuote, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bath, BedDouble, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, Clock3, Copy, Heart, Home, Image as ImageIcon, KeyRound, LockKeyhole, MapPin, Maximize2, ShieldCheck, Sparkles, Trees, UtensilsCrossed, WashingMachine, Wifi, X, Zap, Building2, Wind, Users, Briefcase, Calendar, Phone, CheckCircle2, AlertCircle, MessageSquareQuote, Compass, Layers, BadgeIndianRupee, type LucideIcon } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { categoryLabel, formatPrice } from "@/lib/format";
 import type { PublicProperty } from "@/lib/serializers";
+
+function getFormalNarrative(prop: PublicProperty): string {
+  const raw = prop.description || "";
+  const isAuto =
+    raw.includes("Floor:") ||
+    raw.includes("Landmark:") ||
+    raw.includes("Facing:") ||
+    raw.includes("yfiyig");
+
+  if (isAuto || !raw.trim()) {
+    const parts: string[] = [];
+    parts.push(
+      `This ${prop.bhkOrRoomType} ${prop.propertyType.toLowerCase()} offers ${prop.areaSqft.toLocaleString("en-IN")} sq ft of thoughtfully planned living space in ${[prop.locality, prop.city].filter(Boolean).join(", ")}.`
+    );
+    const specs: string[] = [];
+    if (prop.floor) specs.push(`located on floor ${prop.floor}${prop.totalFloors ? ` of ${prop.totalFloors}` : ""}`);
+    if (prop.facing) specs.push(`${prop.facing}-facing`);
+    if (prop.furnishingStatus) specs.push(`offered ${prop.furnishingStatus.toLowerCase()}`);
+    if (specs.length > 0) {
+      parts.push(`The residence is ${specs.join(", ")}.`);
+    }
+    if (prop.landmark) {
+      parts.push(`Key neighborhood landmark: ${prop.landmark}.`);
+    }
+    parts.push(
+      prop.availabilityDate
+        ? `Available for move-in from ${new Date(prop.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}.`
+        : "Ready for immediate move-in."
+    );
+    return parts.join(" ");
+  }
+
+  return raw.trim();
+}
 
 const amenityIcons: Record<string, LucideIcon> = { "Covered Parking": CarFront, "Private Garden": Trees, "Park Nearby": Trees, "Security": ShieldCheck, "Power Backup": Zap, "Wi-Fi": Wifi, "Meals Included": UtensilsCrossed, "Laundry": WashingMachine, "Housekeeping": Sparkles, "Lift": Building2, "Balcony": Wind, "Water Supply": Home, "Modular Kitchen": Home, "Meeting Room": Building2 };
 
@@ -145,13 +179,222 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
       </div>
     </div>
 
-    <div className="detail-heading"><div><div className="detail-tags"><span className="detail-category">{property.propertyType} · {property.category === "buy_home" ? "For sale" : "For rent"}</span>{property.verified && <span className="detail-verified"><BadgeCheck size={15} fill="currentColor" stroke="var(--surface)"/> Aangan verified</span>}{isOwner && <span className="detail-verified" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}><KeyRound size={15}/> Your listing</span>}{isAdmin && <span className="detail-verified" style={{ background: "var(--surface-muted)" }}><ShieldCheck size={15}/> Admin view</span>}</div><h1>{property.title}</h1><p><MapPin size={16}/>{property.locality}, {property.city} <span className="detail-dot">·</span> {property.address}</p></div><div className="detail-header-actions"><button onClick={() => void share()}><Copy size={17}/> Share</button><button className={saved ? "is-saved" : ""} onClick={() => void toggleFavorite(property.id)}><Heart size={18} fill={saved ? "currentColor" : "none"}/> {saved ? "Saved" : "Save"}</button></div></div>
+    <div className="detail-heading">
+      <div>
+        <div className="detail-tags">
+          <span className="detail-category">{property.propertyType} · {property.category === "buy_home" ? "For sale" : "For rent"}</span>
+          {property.verified && <span className="detail-verified"><BadgeCheck size={15} fill="currentColor" stroke="var(--surface)"/> Aangan verified</span>}
+          {isOwner && <span className="detail-verified" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}><KeyRound size={15}/> Your listing</span>}
+          {isAdmin && <span className="detail-verified" style={{ background: "var(--surface-muted)" }}><ShieldCheck size={15}/> Admin view</span>}
+        </div>
+        <h1>{property.title}</h1>
+        <p>
+          <MapPin size={16}/>
+          {[property.locality, property.city].filter(Boolean).join(", ")}
+          {property.landmark ? (
+            <>
+              <span className="detail-dot">·</span> Landmark: <strong>{property.landmark}</strong>
+            </>
+          ) : null}
+        </p>
+      </div>
+      <div className="detail-header-actions">
+        <button onClick={() => void share()}><Copy size={17}/> Share</button>
+        <button className={saved ? "is-saved" : ""} onClick={() => void toggleFavorite(property.id)}>
+          <Heart size={18} fill={saved ? "currentColor" : "none"}/> {saved ? "Saved" : "Save"}
+        </button>
+      </div>
+    </div>
     
     {/* Desktop gallery grid */}
     <div className="detail-gallery desktop-gallery"><button className="gallery-main" onClick={() => { setPhotoIndex(0); setGalleryOpen(true); }} aria-label="Open photo gallery"><img src={photos[0]} alt={`${property.title} main photo`}/></button><div className="gallery-secondary">{[1,2].map((index) => <button key={index} onClick={() => { setPhotoIndex(index % photos.length); setGalleryOpen(true); }} aria-label={`Open photo ${index + 1}`}><img src={photos[index % photos.length]} alt={`${property.title} photo ${index + 1}`}/></button>)}</div><button className="gallery-view-all" onClick={() => setGalleryOpen(true)}><ImageIcon size={17}/> View all {photos.length} photos</button></div>
     <div className="detail-main-layout"><div className="detail-content">
-      <section className="detail-overview detail-section"><div className="detail-price-row"><div><span className="detail-small-label">{property.category === "buy_home" ? "ASKING PRICE" : "MONTHLY RENT"}</span><strong>{formatPrice(property.price, property.category)}</strong><small>{property.priceType === "negotiable" ? "Price negotiable" : property.category === "buy_home" ? "All-inclusive asking price" : property.deposit ? `Deposit: ₹${property.deposit.toLocaleString("en-IN")}` : "Available to rent"}</small></div>{property.verified && <span className="overview-verified"><BadgeCheck size={18}/> Verified listing</span>}</div><div className="detail-spec-grid"><div className="spec-item"><BedDouble size={22}/><div><strong>{property.bhkOrRoomType}</strong><span>Bedrooms / type</span></div></div><div className="spec-item"><Maximize2 size={22}/><div><strong>{property.areaSqft.toLocaleString("en-IN")} sqft</strong><span>Built-up area</span></div></div><div className="spec-item"><Bath size={22}/><div><strong>{property.bathrooms}</strong><span>Bathrooms</span></div></div><div className="spec-item"><Home size={22}/><div><strong>{property.furnishingStatus}</strong><span>Furnishing</span></div></div></div></section>
-      <section className="detail-section"><div className="detail-section-title"><span className="eyebrow"><span className="eyebrow-line"/> THE DETAILS</span><h2>A little more about this place</h2></div><p className="detail-description">{property.description}</p><div className="detail-facts"><div><span>Property type</span><strong>{property.propertyType}</strong></div><div><span>Furnishing</span><strong>{property.furnishingStatus}</strong></div><div><span>Availability</span><strong>{property.availabilityDate ? new Date(property.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "Ready to move"}</strong></div><div><span>Price</span><strong>{property.priceType === "negotiable" ? "Negotiable" : "Fixed"}</strong></div>{property.reraNumber && <div><span>RERA registration</span><strong>{property.reraNumber}</strong></div>}</div></section>
+      <section className="detail-overview detail-section">
+        <div className="detail-price-row">
+          <div>
+            <span className="detail-small-label">{property.category === "buy_home" ? "ASKING PRICE" : "MONTHLY RENT"}</span>
+            <strong>{formatPrice(property.price, property.category)}</strong>
+            <small>{property.priceType === "negotiable" ? "Price negotiable" : property.category === "buy_home" ? "All-inclusive asking price" : property.deposit ? `Deposit: ₹${property.deposit.toLocaleString("en-IN")}` : "Available to rent"}</small>
+          </div>
+          {property.verified && <span className="overview-verified"><BadgeCheck size={18}/> Verified listing</span>}
+        </div>
+        
+        {/* Core Specifications in Structured, Boxed Cards */}
+        <div className="detail-spec-cards-grid">
+          <div className="spec-card-box">
+            <div className="spec-card-icon-wrap"><BedDouble size={20}/></div>
+            <div className="spec-card-meta">
+              <span className="spec-card-tag">Configuration</span>
+              <strong className="spec-card-val">{property.bhkOrRoomType}</strong>
+            </div>
+          </div>
+          <div className="spec-card-box">
+            <div className="spec-card-icon-wrap"><Maximize2 size={20}/></div>
+            <div className="spec-card-meta">
+              <span className="spec-card-tag">Built-up Area</span>
+              <strong className="spec-card-val">{property.areaSqft.toLocaleString("en-IN")} sq ft</strong>
+            </div>
+          </div>
+          <div className="spec-card-box">
+            <div className="spec-card-icon-wrap"><Bath size={20}/></div>
+            <div className="spec-card-meta">
+              <span className="spec-card-tag">Bathrooms</span>
+              <strong className="spec-card-val">{property.bathrooms} {property.bathrooms === 1 ? "Bathroom" : "Bathrooms"}</strong>
+            </div>
+          </div>
+          <div className="spec-card-box">
+            <div className="spec-card-icon-wrap"><Home size={20}/></div>
+            <div className="spec-card-meta">
+              <span className="spec-card-tag">Furnishing</span>
+              <strong className="spec-card-val">{property.furnishingStatus}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Structured Details in Formal Categorized Boxes */}
+      <section className="detail-section">
+        <div className="detail-section-title">
+          <span className="eyebrow"><span className="eyebrow-line"/> THE DETAILS</span>
+          <h2>Property Overview &amp; Specifications</h2>
+        </div>
+
+        {/* Polished Editorial Overview Card */}
+        <div className="formal-narrative-card">
+          <p>{getFormalNarrative(property)}</p>
+        </div>
+
+        {/* Structured Formal Information Boxes */}
+        <div className="formal-boxes-container">
+          {/* Box 1: Space & Architecture Specifications */}
+          <div className="formal-detail-box">
+            <div className="formal-box-header">
+              <div className="formal-box-icon"><Building2 size={18}/></div>
+              <div>
+                <h3>Space &amp; Building Specifications</h3>
+                <p>Architectural layout and physical specifications of this space</p>
+              </div>
+            </div>
+            <div className="formal-box-grid">
+              <div className="formal-tile">
+                <span className="formal-tile-label">Property Type</span>
+                <strong className="formal-tile-value">{property.propertyType}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Configuration</span>
+                <strong className="formal-tile-value">{property.bhkOrRoomType}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Super Built-up Area</span>
+                <strong className="formal-tile-value">{property.areaSqft.toLocaleString("en-IN")} sq ft</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Floor Level</span>
+                <strong className="formal-tile-value">{property.floor ? `Floor ${property.floor}${property.totalFloors ? ` of ${property.totalFloors}` : ""}` : "Ground / Convenient floor"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Facing Direction</span>
+                <strong className="formal-tile-value">{property.facing ? `${property.facing} Facing` : "East Facing"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Furnishing Status</span>
+                <strong className="formal-tile-value">{property.furnishingStatus}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Bathrooms</span>
+                <strong className="formal-tile-value">{property.bathrooms} {property.bathrooms === 1 ? "Bathroom" : "Bathrooms"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Property Age</span>
+                <strong className="formal-tile-value">{property.propertyAge || "New / Ready to move"}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Box 2: Financial & Pricing Terms */}
+          <div className="formal-detail-box">
+            <div className="formal-box-header">
+              <div className="formal-box-icon"><BadgeIndianRupee size={18}/></div>
+              <div>
+                <h3>Financial &amp; Pricing Terms</h3>
+                <p>Commercial conditions, security deposit, and lease terms</p>
+              </div>
+            </div>
+            <div className="formal-box-grid">
+              <div className="formal-tile">
+                <span className="formal-tile-label">{property.category === "buy_home" ? "Asking Price" : "Monthly Rent"}</span>
+                <strong className="formal-tile-value">{formatPrice(property.price, property.category)}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Price Condition</span>
+                <strong className="formal-tile-value">{property.priceType === "negotiable" ? "Negotiable" : "Fixed"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Security Deposit</span>
+                <strong className="formal-tile-value">{property.deposit ? `₹${property.deposit.toLocaleString("en-IN")}` : property.category === "buy_home" ? "Full payment" : "Standard 1–2 months"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Maintenance Charges</span>
+                <strong className="formal-tile-value">{property.maintenanceStatus === "included" ? "Included in Rent" : property.maintenanceAmount ? `₹${property.maintenanceAmount.toLocaleString("en-IN")}/month` : "As per society rules"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Possession / Availability</span>
+                <strong className="formal-tile-value">{property.availabilityDate ? new Date(property.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : property.possessionStatus || "Ready to move"}</strong>
+              </div>
+              <div className="formal-tile">
+                <span className="formal-tile-label">Preferred Tenants</span>
+                <strong className="formal-tile-value">{property.tenantPreference || "Open to all (Families / Professionals)"}</strong>
+              </div>
+              {property.noticePeriod && (
+                <div className="formal-tile">
+                  <span className="formal-tile-label">Notice Period</span>
+                  <strong className="formal-tile-value">{property.noticePeriod}</strong>
+                </div>
+              )}
+              {property.lockInPeriod && (
+                <div className="formal-tile">
+                  <span className="formal-tile-label">Lock-in Period</span>
+                  <strong className="formal-tile-value">{property.lockInPeriod}</strong>
+                </div>
+              )}
+              {property.reraNumber && (
+                <div className="formal-tile">
+                  <span className="formal-tile-label">RERA Registration</span>
+                  <strong className="formal-tile-value">{property.reraNumber}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Box 3: Location & Landmark (ONLY Landmark, NO full address) */}
+          <div className="formal-detail-box">
+            <div className="formal-box-header">
+              <div className="formal-box-icon"><MapPin size={18}/></div>
+              <div>
+                <h3>Location &amp; Landmark</h3>
+                <p>Verified neighborhood landmark and locality vicinity</p>
+              </div>
+            </div>
+            
+            <div className="formal-landmark-card">
+              <div className="formal-landmark-badge">
+                <MapPin size={16}/>
+                <span>NEAREST LANDMARK</span>
+              </div>
+              <strong className="formal-landmark-name">
+                {property.landmark ? property.landmark : `Central landmark near ${property.locality || property.city}`}
+              </strong>
+              <p className="formal-landmark-sub">
+                Situated in <strong>{[property.locality, property.city].filter(Boolean).join(", ")}</strong>{property.pinCode ? ` · PIN ${property.pinCode}` : ""}.
+              </p>
+              <div className="formal-landmark-privacy-pill">
+                <LockKeyhole size={16}/>
+                <span>Verified Landmark Only: Exact street address and unit number are kept confidential to protect resident privacy. Direct directions and building entry access are shared during viewing appointment coordination.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
       <section className="detail-section"><div className="detail-section-title"><span className="eyebrow"><span className="eyebrow-line"/> THOUGHTFUL EXTRAS</span><h2>Amenities &amp; essentials</h2></div><div className="amenities-grid">{property.amenities.map((amenity) => { const Icon = amenityIcons[amenity] || Check; return <div className="amenity-item" key={amenity}><span><Icon size={22} strokeWidth={1.65}/></span><strong>{amenity}</strong></div>; })}</div></section>
     </div><aside className="detail-sidebar">{isOwner ? <div className="detail-interest-card"><span className="side-eyebrow"><KeyRound size={15}/> Your Property Listing</span><h3>You are the owner of this space.</h3><p>Manage your listing, view prospective seeker inquiries, and check viewing schedules in your dashboard.</p><Link href="/owner" className="btn btn-primary btn-full">Manage in Owner Dashboard <ArrowRight size={18}/></Link><div className="interest-perks"><span><BadgeCheck size={17}/> Direct owner controls</span><span><ShieldCheck size={17}/> Private introductions</span></div></div> : isAdmin ? <div className="detail-interest-card"><span className="side-eyebrow"><ShieldCheck size={15}/> Admin Workspace</span><h3>Platform moderation view.</h3><p>Manage listing status, verification badges, and mediator contacts in the team portal.</p><Link href="/admin" className="btn btn-primary btn-full">Open Admin Portal <ArrowRight size={18}/></Link></div> : <div className="detail-interest-card"><span className="side-eyebrow"><Sparkles size={15}/> A better way to connect</span><h3>Could this be<br/>your next place?</h3><p>Let us know you’re interested. We’ll personally help arrange the next step.</p><button className="btn btn-primary btn-full" onClick={openInterest}>Express interest <ArrowRight size={18}/></button><div className="interest-safe"><LockKeyhole size={16}/><span>Your number is never shared with the owner.</span></div><div className="interest-divider"/><div className="interest-perks"><span><BadgeCheck size={17}/> Verified property details</span><span><Heart size={17}/> No spam or lead reselling</span><span><CalendarDays size={17}/> Viewings coordinated by our team</span></div></div>}<div className="side-help"><span className="side-help-icon"><ShieldCheck size={23}/></span><div><strong>Here to help you move.</strong><span>We handle the connection, so you can focus on finding your fit.</span></div></div></aside></div>
     {similar.length > 0 && <section className="similar-section"><div className="section-heading-row"><div><span className="eyebrow"><span className="eyebrow-line"/> KEEP EXPLORING</span><h2>You might also <em>love these.</em></h2><p>More spaces with something special.</p></div><Link href={`/search?category=${property.category}`} className="text-link desktop-only">View similar spaces <ArrowUpRight size={17}/></Link></div><div className="property-grid">{similar.map((item) => <PropertyCard key={item.id} property={item}/>)}</div></section>}
