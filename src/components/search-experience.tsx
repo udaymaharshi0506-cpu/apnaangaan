@@ -2,13 +2,35 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, ChevronDown, LayoutGrid, ListFilter, Map, MapPin, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { LocationSuggest } from "@/components/search-controls";
 import { categoryLabel } from "@/lib/format";
 import type { PublicProperty } from "@/lib/serializers";
+
+export function PropertyCardSkeletonGrid({ count = 6 }: { count?: number }) {
+  return (
+    <div className="search-grid">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="property-card skeleton-card">
+          <div className="property-image-wrap skeleton" />
+          <div className="skeleton-body">
+            <div className="skeleton-line short skeleton" />
+            <div className="skeleton-title skeleton" />
+            <div className="skeleton-line medium skeleton" />
+            <div className="skeleton-specs">
+              <span className="skeleton-spec-item skeleton" />
+              <span className="skeleton-spec-item skeleton" />
+              <span className="skeleton-spec-item skeleton" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 type Result = { items: PublicProperty[]; total: number; page: number; pages: number; limit: number };
 const rentalTypes = [
@@ -25,6 +47,7 @@ const furnishingOptions = ["Unfurnished", "Semi-furnished", "Fully furnished"];
 export function SearchExperience({ result, initialFilters }: { result: Result; initialFilters: Record<string, string> }) {
   const router = useRouter();
   const { user, toast } = useApp();
+  const [isPending, startTransition] = useTransition();
   const [query, setQuery] = useState(initialFilters.q || initialFilters.city || "");
   const [draft, setDraft] = useState<Record<string, string>>(initialFilters);
   const [mapView, setMapView] = useState(initialFilters.view === "map");
@@ -45,7 +68,9 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
     const next = new URLSearchParams(initialFilters);
     for (const [key, value] of Object.entries(changes)) value ? next.set(key, value) : next.delete(key);
     if (!("page" in changes) && !("view" in changes)) next.delete("page");
-    router.push(`/search${next.toString() ? `?${next}` : ""}`);
+    startTransition(() => {
+      router.push(`/search${next.toString() ? `?${next}` : ""}`);
+    });
   }
   function submitSearch(event: FormEvent) { event.preventDefault(); navigate({ q: query.split(",")[0].trim() || undefined, city: undefined }); }
   function applyFilters() {
@@ -92,9 +117,27 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
     <div className="search-category-scroll">{rentalTypes.map((item) => <button key={item.value} className={(initialFilters.propertyType === item.value || (!initialFilters.propertyType && !item.value)) ? "active" : ""} onClick={() => navigate({ propertyType: item.value || undefined })}>{item.label}</button>)}</div>
     <div className="search-body"><aside className="desktop-filters">{filters}</aside><div className="search-results">
       <div className="results-toolbar"><div><strong>{result.total} {result.total === 1 ? "home" : "homes"} for rent</strong><span>Rental homes{initialFilters.q ? ` · ${initialFilters.q}` : initialFilters.city ? ` · ${initialFilters.city}` : ""}{initialFilters.propertyType ? ` · ${initialFilters.propertyType}` : ""}</span></div><div className="toolbar-actions"><button className="mobile-filter-button" onClick={() => setFilterOpen(true)}><SlidersHorizontal size={17}/> Filters {activeFilters > 0 && <b>{activeFilters}</b>}</button><label className="sort-select">Sort by <select value={initialFilters.sort || "relevance"} onChange={(e) => navigate({ sort: e.target.value === "relevance" ? undefined : e.target.value })}><option value="relevance">Recommended</option><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select><ChevronDown size={14}/></label><div className="view-toggle"><button className={!mapView ? "active" : ""} onClick={() => { setMapView(false); navigate({ view: undefined }); }} aria-label="List view"><LayoutGrid size={17}/></button><button className={mapView ? "active" : ""} onClick={() => { setMapView(true); navigate({ view: "map" }); }} aria-label="Map view"><Map size={17}/></button></div></div></div>
-      {result.items.length ? mapView ? <div className="map-results"><div className="map-list">{result.items.map((property) => <PropertyCard key={property.id} property={property} compact/>)}</div><div className="map-canvas"><iframe title="Properties map" src={mapUrl} loading="lazy"/><div className="map-overlay-note"><MapPin size={16}/> Viewing the {first?.locality} area</div></div></div> : <div className="search-grid">{result.items.map((property) => <PropertyCard key={property.id} property={property}/>)}</div> : <div className="empty-results"><div><ListFilter size={35}/></div><h3>No properties found</h3><p>{hasAnyActiveFilter ? "No properties match your active search or filter criteria. Reset filters to view all available rental homes." : "Try searching a Jaipur locality like Mansarovar, Vaishali Nagar, or Malviya Nagar."}</p><button className="btn btn-primary" onClick={resetAllFilters}>Reset Filters <ArrowRight size={17}/></button></div>}
+      {isPending ? (
+        <PropertyCardSkeletonGrid count={result.items.length || 6} />
+      ) : result.items.length ? (
+        mapView ? (
+          <div className="map-results">
+            <div className="map-list">{result.items.map((property) => <PropertyCard key={property.id} property={property} compact/>)}</div>
+            <div className="map-canvas"><iframe title="Properties map" src={mapUrl} loading="lazy"/><div className="map-overlay-note"><MapPin size={16}/> Viewing the {first?.locality} area</div></div>
+          </div>
+        ) : (
+          <div className="search-grid">{result.items.map((property) => <PropertyCard key={property.id} property={property}/>)}</div>
+        )
+      ) : (
+        <div className="empty-results">
+          <div><ListFilter size={35}/></div>
+          <h3>No properties found</h3>
+          <p>{hasAnyActiveFilter ? "No properties match your active search or filter criteria. Reset filters to view all available rental homes." : "Try searching a Jaipur locality like Mansarovar, Vaishali Nagar, or Malviya Nagar."}</p>
+          <button className="btn btn-primary" onClick={resetAllFilters}>Reset Filters <ArrowRight size={16}/></button>
+        </div>
+      )}
       {result.pages > 1 && <div className="pagination"><button disabled={result.page <= 1} onClick={() => navigate({ page: String(result.page - 1) })}><ArrowLeft size={16}/> Previous</button><span>Page {result.page} of {result.pages}</span><button disabled={result.page >= result.pages} onClick={() => navigate({ page: String(result.page + 1) })}>Next <ArrowRight size={16}/></button></div>}
     </div></div>
     <div className="search-bottom-note"><BadgeCheck size={18}/><span>Every verified rental home has been reviewed by our team. Your details are never shared directly with an owner.</span><Link href="/privacy">Learn more <ArrowUpRight size={14}/></Link></div>
-  </div>{filterOpen && <div className="filter-modal-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-modal" onClick={(e) => e.stopPropagation()}>{filters}</div></div>}</main>;
+  </div>{filterOpen && <div className="filter-modal-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-modal" onClick={(e) => e.stopPropagation()}><div className="sheet-drag-handle" />{filters}</div></div>}</main>;
 }

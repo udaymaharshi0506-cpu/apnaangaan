@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles } from "lucide-react";
+import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles, ArrowUp } from "lucide-react";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
 
@@ -39,11 +39,32 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const { user, loading, theme, toggleTheme, unreadCount, recentNotifications, markAllNotificationsRead, markNotificationRead } = useApp();
   const [locationOpen, setLocationOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const [city, setCity] = useState("Bengaluru");
   const isAdmin = pathname.startsWith("/admin");
   const isPropertyDetail = pathname.startsWith("/property/");
   const isAuth = ["/login", "/signup", "/setup", "/welcome"].includes(pathname);
+
+  // Sticky header scroll listener & Back to top
+  useEffect(() => {
+    let ticking = false;
+    function handleScroll() {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const y = window.scrollY;
+          setIsScrolled(y > 20);
+          setShowBackToTop(y > 380);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    }
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Close notifications popover on click outside
   useEffect(() => {
@@ -103,10 +124,20 @@ export function SiteShell({ children }: { children: ReactNode }) {
   ];
 
   return <>
-    <header className="site-header">
+    <header className={`site-header ${isScrolled ? "scrolled" : ""}`}>
       <div className="nav-container">
         <Brand />
-        <nav className="desktop-nav" aria-label="Main navigation">{currentNavLinks.map((link) => <Link key={link.label} href={link.href} className="nav-link">{link.label}</Link>)}</nav>
+        <nav className="desktop-nav" aria-label="Main navigation">
+          {currentNavLinks.map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              className={`nav-link ${pathname === link.href ? "active" : ""}`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
         <div className="header-actions">
           <div className="header-location-wrap">
             <button className="header-location" onClick={() => setLocationOpen(!locationOpen)} aria-label="Choose city"><MapPin size={16}/><span>{city}</span><ChevronDown size={14}/></button>
@@ -221,7 +252,16 @@ export function SiteShell({ children }: { children: ReactNode }) {
         </div>
       </div>
     </header>
-    <div className="site-content">{children}</div>
+    <div className="site-content page-transition-wrap" key={pathname}>{children}</div>
+    <button
+      type="button"
+      className={`back-to-top ${showBackToTop ? "visible" : ""}`}
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      aria-label="Back to top"
+      title="Scroll back to top"
+    >
+      <ArrowUp size={20} strokeWidth={2.4} />
+    </button>
     {!isAuth && <footer className="site-footer"><div className="container footer-grid">
       <div className="footer-about"><Brand light/><p>A more thoughtful way to find your place. Real homes, verified details, and a team that puts your privacy first.</p><span className="footer-trust"><ShieldCheck size={16}/> Your home search, handled with care.</span></div>
       <div className="footer-col"><h4>Explore</h4><Link href="/search">All rental homes</Link><Link href="/search?bhk=1">1 BHK Rentals</Link><Link href="/search?bhk=2">2 BHK Rentals</Link><Link href="/search?bhk=3">3 BHK Rentals</Link><Link href="/search?q=Villa">Villas & Houses</Link></div>

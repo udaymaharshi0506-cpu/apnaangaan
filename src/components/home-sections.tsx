@@ -27,9 +27,23 @@ export function FeaturedListings({ properties }: { properties: PublicProperty[] 
   const displayed = filtered.slice(0, 6);
   return <section className="featured-section section-pad"><div className="container">
     <div className="section-heading-row"><div><span className="eyebrow"><span className="eyebrow-line"/> HANDPICKED FOR YOU</span><h2>Homes worth a <em>closer look.</em></h2><p>Verified rental spaces with real peace of mind.</p></div><Link href="/search" className="text-link desktop-only">Explore all rentals <ArrowUpRight size={17}/></Link></div>
-    <div className="featured-filter-row">{tabs.map((item) => <button key={item.value} className={`filter-tab ${tab === item.value ? "active" : ""}`} onClick={() => setTab(item.value)}>{item.label}</button>)}</div>
+    <div className="featured-filter-row">
+      {tabs.map((item) => (
+        <button
+          key={item.value}
+          className={`filter-tab ${tab === item.value ? "active" : ""}`}
+          onClick={() => setTab(item.value)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
     {displayed.length > 0 ? (
-      <div className="property-grid">{displayed.map((property) => <PropertyCard key={property.id} property={property}/>)}</div>
+      <div className="property-grid page-transition-wrap" key={tab}>
+        {displayed.map((property) => (
+          <PropertyCard key={property.id} property={property} />
+        ))}
+      </div>
     ) : (
       <div className="empty-results" style={{ padding: "3rem 1.5rem", margin: "1.5rem 0" }}>
         <h3>No rental spaces listed in this category yet</h3>

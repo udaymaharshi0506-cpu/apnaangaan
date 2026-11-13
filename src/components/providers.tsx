@@ -444,5 +444,19 @@ export function AppProviders({ children }: { children: ReactNode }) {
     markAllNotificationsRead,
     markNotificationRead,
   ]);
-  return <AppContext.Provider value={value}>{children}{notice && <div className={`app-toast ${notice.kind}`} role="status">{notice.kind === "success" ? <CheckCircle2 size={19} /> : <Info size={19} />}<span>{notice.message}</span><button aria-label="Dismiss" onClick={() => setNotice(null)}><X size={17} /></button></div>}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+      {notice && (
+        <div className={`app-toast ${notice.kind}`} role="status">
+          {notice.kind === "success" ? <CheckCircle2 size={19} /> : <Info size={19} />}
+          <span>{notice.message}</span>
+          <button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>
+            <X size={16} />
+          </button>
+          <span className="toast-progress-bar" key={notice.message} />
+        </div>
+      )}
+    </AppContext.Provider>
+  );
 }

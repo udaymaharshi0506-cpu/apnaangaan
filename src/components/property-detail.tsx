@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bath, BedDouble, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, Clock3, Copy, Heart, Home, Image as ImageIcon, KeyRound, LockKeyhole, MapPin, Maximize2, ShieldCheck, Sparkles, Trees, UtensilsCrossed, WashingMachine, Wifi, X, Zap, Building2, Wind, Users, Briefcase, Calendar, Phone, CheckCircle2, AlertCircle, MessageSquareQuote, Compass, Layers, BadgeIndianRupee, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bath, BedDouble, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, Clock3, Copy, Heart, Home, Image as ImageIcon, KeyRound, LockKeyhole, MapPin, Maximize2, ShieldCheck, Sparkles, Trees, UtensilsCrossed, WashingMachine, Wifi, X, Zap, Building2, Wind, Users, Briefcase, Calendar, Phone, CheckCircle2, AlertCircle, MessageSquareQuote, Compass, Layers, BadgeIndianRupee, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { categoryLabel, formatPrice } from "@/lib/format";
@@ -56,9 +56,54 @@ const contactOptions = ["Anytime is fine", "Morning (9 AM–12 PM)", "Afternoon 
 export function PropertyDetail({ property, similar, isOwner = false, isAdmin = false }: { property: PublicProperty; similar: PublicProperty[]; isOwner?: boolean; isAdmin?: boolean }) {
   const router = useRouter();
   const { user, savedIds, toggleFavorite, toast } = useApp();
+  const photos = property.images && property.images.length > 0 ? property.images : ["https://images.pexels.com/photos/7031732/pexels-photo-7031732.jpeg?auto=compress&cs=tinysrgb&w=1200"];
   const [photoIndex, setPhotoIndex] = useState(0);
   const [mobilePhotoIndex, setMobilePhotoIndex] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const touchStartX = useRef<number | null>(null);
+  const thumbListRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard navigation & touch-swipe support for lightbox
+  useEffect(() => {
+    if (!galleryOpen) {
+      setIsZoomed(false);
+      return;
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setGalleryOpen(false);
+      else if (e.key === "ArrowLeft") setPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
+      else if (e.key === "ArrowRight") setPhotoIndex((prev) => (prev + 1) % photos.length);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [galleryOpen, photos.length]);
+
+  // Auto-scroll active thumbnail into view
+  useEffect(() => {
+    if (!galleryOpen || !thumbListRef.current) return;
+    const activeBtn = thumbListRef.current.children[photoIndex] as HTMLElement | undefined;
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [galleryOpen, photoIndex]);
+
+  function handleLightboxTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX;
+  }
+
+  function handleLightboxTouchEnd(e: React.TouchEvent) {
+    if (touchStartX.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(deltaX) > 40) {
+      if (deltaX > 0) {
+        setPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
+      } else {
+        setPhotoIndex((prev) => (prev + 1) % photos.length);
+      }
+    }
+    touchStartX.current = null;
+  }
   
   // Enhanced homeseeker inquiry state (No pre-selected defaults)
   const [interestOpen, setInterestOpen] = useState(false);
@@ -183,7 +228,6 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
     if (navigator.share) { try { await navigator.share({ title: property.title, url }); } catch { /* Cancelled by user. */ } }
     else { await navigator.clipboard.writeText(url); toast("Link copied to clipboard"); }
   }
-  const photos = property.images && property.images.length > 0 ? property.images : ["https://images.pexels.com/photos/7031732/pexels-photo-7031732.jpeg?auto=compress&cs=tinysrgb&w=1200"];
   return <main className="detail-page"><div className="container detail-container">
     <div className="breadcrumbs detail-breadcrumbs"><Link href="/">Home</Link><span>/</span><Link href="/search">Homes for rent</Link><span>/</span><span>{property.title}</span></div>
     
@@ -251,8 +295,38 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
       </div>
     </div>
     
-    {/* Desktop gallery grid */}
-    <div className="detail-gallery desktop-gallery"><button className="gallery-main" onClick={() => { setPhotoIndex(0); setGalleryOpen(true); }} aria-label="Open photo gallery"><img src={photos[0]} alt={`${property.title} main photo`}/></button><div className="gallery-secondary">{[1,2].map((index) => <button key={index} onClick={() => { setPhotoIndex(index % photos.length); setGalleryOpen(true); }} aria-label={`Open photo ${index + 1}`}><img src={photos[index % photos.length]} alt={`${property.title} photo ${index + 1}`}/></button>)}</div><button className="gallery-view-all" onClick={() => setGalleryOpen(true)}><ImageIcon size={17}/> View all {photos.length} photos</button></div>
+    {/* Desktop gallery grid - Editorial Multi-Photo Layout */}
+    <div className={`detail-gallery desktop-gallery ${photos.length >= 5 ? "gallery-5-grid" : photos.length >= 3 ? "gallery-3-grid" : "gallery-single"}`}>
+      <button
+        type="button"
+        className="gallery-main"
+        onClick={() => { setPhotoIndex(0); setGalleryOpen(true); }}
+        aria-label="Open primary photo"
+      >
+        <img src={photos[0]} alt={`${property.title} main photo`} />
+      </button>
+      {photos.length > 1 && (
+        <div className="gallery-secondary">
+          {photos.slice(1, photos.length >= 5 ? 5 : 3).map((photo, idx) => (
+            <button
+              type="button"
+              key={idx + 1}
+              onClick={() => { setPhotoIndex(idx + 1); setGalleryOpen(true); }}
+              aria-label={`Open photo ${idx + 2}`}
+            >
+              <img src={photo} alt={`${property.title} photo ${idx + 2}`} />
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="gallery-view-all"
+        onClick={() => setGalleryOpen(true)}
+      >
+        <ImageIcon size={17} /> View all {photos.length} photos
+      </button>
+    </div>
     <div className="detail-main-layout"><div className="detail-content">
       <section className="detail-overview detail-section">
         <div className="detail-price-row">
@@ -445,7 +519,92 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
     {similar.length > 0 && <section className="similar-section"><div className="section-heading-row"><div><span className="eyebrow"><span className="eyebrow-line"/> KEEP EXPLORING</span><h2>You might also <em>love these.</em></h2><p>More rental spaces with something special.</p></div><Link href="/search" className="text-link desktop-only">View more rental spaces <ArrowUpRight size={17}/></Link></div><div className="property-grid">{similar.map((item) => <PropertyCard key={item.id} property={item}/>)}</div></section>}
   </div>
   <div className="detail-mobile-bar"><div><small>Monthly rent</small><strong>{formatPrice(property.price, "rent_home")}</strong></div>{isOwner ? <Link className="btn btn-primary" href="/owner">Manage listing <ArrowRight size={17}/></Link> : isAdmin ? <Link className="btn btn-primary" href="/admin">Admin Workspace <ArrowRight size={17}/></Link> : <button className="btn btn-primary" onClick={openInterest}>Express interest <ArrowRight size={17}/></button>}</div>
-  {galleryOpen && <div className="gallery-lightbox" role="dialog" aria-modal="true" aria-label="Property photos"><div className="lightbox-top"><span>{property.title} <small>· {photoIndex + 1} of {photos.length}</small></span><button onClick={() => setGalleryOpen(false)} aria-label="Close gallery"><X size={25}/></button></div><div className="lightbox-stage"><button onClick={() => setPhotoIndex((photoIndex - 1 + photos.length) % photos.length)} aria-label="Previous photo"><ChevronLeft size={26}/></button><img src={photos[photoIndex]} alt={`${property.title} photo ${photoIndex + 1}`}/><button onClick={() => setPhotoIndex((photoIndex + 1) % photos.length)} aria-label="Next photo"><ChevronRight size={26}/></button></div><div className="lightbox-thumbs">{photos.map((photo, index) => <button key={index} className={index === photoIndex ? "active" : ""} onClick={() => setPhotoIndex(index)}><img src={photo} alt={`Thumbnail ${index + 1}`}/></button>)}</div></div>}
+  {galleryOpen && (
+    <div
+      className="gallery-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Property photos"
+      onTouchStart={handleLightboxTouchStart}
+      onTouchEnd={handleLightboxTouchEnd}
+    >
+      <div className="lightbox-top">
+        <div className="lightbox-title-wrap">
+          <span className="lightbox-title">{property.title}</span>
+          <span className="lightbox-counter">{photoIndex + 1} / {photos.length}</span>
+        </div>
+        <div className="lightbox-top-actions">
+          <button
+            type="button"
+            className="lightbox-action-btn"
+            onClick={() => setIsZoomed((z) => !z)}
+            aria-label={isZoomed ? "Zoom out" : "Zoom in"}
+            title={isZoomed ? "Zoom out" : "Zoom in"}
+          >
+            {isZoomed ? <ZoomOut size={19} /> : <ZoomIn size={19} />}
+          </button>
+          <button
+            type="button"
+            className="lightbox-action-btn close-btn"
+            onClick={() => setGalleryOpen(false)}
+            aria-label="Close gallery (Esc)"
+            title="Close (Esc)"
+          >
+            <X size={22} />
+          </button>
+        </div>
+      </div>
+
+      <div className="lightbox-stage">
+        <button
+          type="button"
+          className="lightbox-nav-btn prev"
+          onClick={() => setPhotoIndex((photoIndex - 1 + photos.length) % photos.length)}
+          aria-label="Previous photo (Left arrow)"
+          title="Previous (Left arrow)"
+        >
+          <ChevronLeft size={28} strokeWidth={2.2} />
+        </button>
+
+        <div className={`lightbox-image-container ${isZoomed ? "is-zoomed" : ""}`}>
+          <img
+            src={photos[photoIndex]}
+            alt={`${property.title} photo ${photoIndex + 1}`}
+            onClick={() => setIsZoomed((z) => !z)}
+          />
+        </div>
+
+        <button
+          type="button"
+          className="lightbox-nav-btn next"
+          onClick={() => setPhotoIndex((photoIndex + 1) % photos.length)}
+          aria-label="Next photo (Right arrow)"
+          title="Next (Right arrow)"
+        >
+          <ChevronRight size={28} strokeWidth={2.2} />
+        </button>
+      </div>
+
+      <div className="lightbox-bottom-bar">
+        <div className="lightbox-thumbs" ref={thumbListRef}>
+          {photos.map((photo, index) => (
+            <button
+              type="button"
+              key={index}
+              className={`thumb-btn ${index === photoIndex ? "active" : ""}`}
+              onClick={() => {
+                setIsZoomed(false);
+                setPhotoIndex(index);
+              }}
+              aria-label={`Jump to photo ${index + 1}`}
+            >
+              <img src={photo} alt={`Thumbnail ${index + 1}`} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )}
   {interestOpen && (
     <div className="modal-backdrop" onClick={() => setInterestOpen(false)}>
       <div className="interest-modal expanded" role="dialog" aria-modal="true" aria-label="Express interest" onClick={(e) => e.stopPropagation()}>
