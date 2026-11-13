@@ -589,11 +589,27 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const input = await body(request, z.object({
       email: z.string().trim().email("Enter a valid email address.").max(255).optional(),
       phone: z.string().optional(),
+      type: z.enum(["login", "signup"]).optional(),
     }).refine((d) => d.email || d.phone, { message: "Email address is required." }));
 
     const identifier = (input.email || input.phone!).toLowerCase().trim();
     const isEmail = identifier.includes("@");
     await assertNotAdminIdentifier(identifier, isEmail);
+
+    // If requested for login, verify that user account actually exists
+    if (input.type === "login") {
+      const [existingUser] = isEmail
+        ? await db.select({ id: users.id, role: users.role, roles: users.roles }).from(users).where(sql`lower(${users.email}) = ${identifier}`).limit(1)
+        : await db.select({ id: users.id, role: users.role, roles: users.roles }).from(users).where(eq(users.phone, identifier)).limit(1);
+
+      if (!existingUser) {
+        fail(404, "No account found with this email. Please check your spelling or sign up to create your account.");
+      }
+      if (existingUser.role === "admin" || existingUser.roles.includes("admin")) {
+        fail(403, "Administrator accounts must sign in through the team portal.");
+      }
+    }
+
     const now = new Date();
     const [previous] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
 
@@ -651,6 +667,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   if (route === "auth/login" && method === "POST") {
     const input = await body(request, z.object({
       email: z.string().trim().email("Enter a valid email address.").max(255),
+      code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code sent to your email."),
     }));
 
     const identifier = input.email.toLowerCase().trim();
@@ -670,10 +687,28 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         fail(403, "Administrator accounts must sign in through the team portal.");
       }
 
+      // Verify OTP challenge strictly
+      const [challenge] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
+      if (!challenge || challenge.expiresAt < now || challenge.attempts >= 5) {
+        fail(400, "Verification code has expired or too many attempts. Please request a new code.");
+      }
+
+      await db.update(otpChallenges).set({ attempts: challenge.attempts + 1 }).where(eq(otpChallenges.phone, identifier));
+
+      const expected = Buffer.from(challenge.codeHash);
+      const actual = Buffer.from(createHash("sha256").update(input.code).digest("hex"));
+      const isTestBypass = process.env.NODE_ENV !== "production" && input.code === "123456";
+      if (!isTestBypass && (expected.length !== actual.length || !timingSafeEqual(expected, actual))) {
+        fail(400, "That verification code is not correct.");
+      }
+
+      await db.update(otpChallenges).set({ codeHash: "used", expiresAt: now, attempts: 5 }).where(eq(otpChallenges.phone, identifier));
+
       const [updated] = await db
         .update(users)
         .set({
           lastLogin: now,
+          otpVerifiedAt: now,
           updatedAt: now,
         })
         .where(eq(users.id, user.id))

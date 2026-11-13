@@ -29,22 +29,35 @@ import { extractIndianPhoneDigits, normalizeWhitespace, parseIndianPhone } from 
 
 // ─────────────────────────────────────────────────────────────
 // LoginExperience
-// Simple direct email login for registered users.
-// Takes users straight to the home page without asking details again.
+// Secure 2-step email + OTP verification login for registered users.
+// Takes users straight to their destination without bypassing OTP.
 // ─────────────────────────────────────────────────────────────
 export function LoginExperience({ next = "/" }: { next?: string }) {
   const router = useRouter();
   const { refreshUser, toast } = useApp();
 
+  const [step, setStep] = useState<"email" | "otp">("email");
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const submitLockRef = useRef(false);
   const [error, setError] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const destination =
     next.startsWith("/") && !next.startsWith("//") && next !== "/setup" && next !== "/login" ? next : "/";
 
-  async function handleLogin(event: FormEvent) {
+  // Resend cooldown countdown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  // ── Step 1: Request OTP code for registered email ─────────
+  async function handleRequestOtp(event: FormEvent) {
     event.preventDefault();
     if (busy || submitLockRef.current) return;
     setError("");
@@ -56,11 +69,45 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
     submitLockRef.current = true;
     setBusy(true);
     try {
+      await apiFetch<{ message: string; code?: string }>(
+        "/api/auth/otp/request",
+        {
+          method: "POST",
+          body: JSON.stringify({ email: cleanEmail, type: "login" }),
+        }
+      );
+      setStep("otp");
+      setResendCooldown(30);
+      toast(`Verification code sent to ${cleanEmail}`);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Couldn't send your code. Please check your connection and try again."
+      );
+    } finally {
+      submitLockRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  // ── Step 2: Verify OTP code and complete login ─────────────
+  async function handleVerifyOtp(event: FormEvent) {
+    event.preventDefault();
+    if (busy || submitLockRef.current) return;
+    setError("");
+    const cleanEmail = normalizeWhitespace(email).toLowerCase();
+    const cleanCode = code.replace(/\D/g, "");
+    if (cleanCode.length !== 6) {
+      setError("Please enter the 6-digit verification code sent to your email.");
+      return;
+    }
+    submitLockRef.current = true;
+    setBusy(true);
+    try {
       const data = await apiFetch<{ user: SessionUser; message?: string }>(
         "/api/auth/login",
         {
           method: "POST",
-          body: JSON.stringify({ email: cleanEmail }),
+          body: JSON.stringify({ email: cleanEmail, code: cleanCode }),
         }
       );
       await refreshUser();
@@ -70,10 +117,33 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
       router.refresh();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Couldn't log you in. Please check your connection and try again."
+        err instanceof Error ? err.message : "Couldn't verify your code. Please try again."
       );
     } finally {
       submitLockRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  // ── Resend OTP code ───────────────────────────────────────
+  async function handleResendCode() {
+    if (busy || resendCooldown > 0) return;
+    setError("");
+    setBusy(true);
+    try {
+      const cleanEmail = normalizeWhitespace(email).toLowerCase();
+      await apiFetch<{ message: string }>(
+        "/api/auth/otp/request",
+        {
+          method: "POST",
+          body: JSON.stringify({ email: cleanEmail, type: "login" }),
+        }
+      );
+      setResendCooldown(30);
+      toast(`A fresh verification code has been sent to ${cleanEmail}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resend verification code.");
+    } finally {
       setBusy(false);
     }
   }
@@ -93,43 +163,111 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
             </span>
 
             <span className="eyebrow">
-              <span className="eyebrow-line" /> WELCOME BACK
+              <span className="eyebrow-line" /> {step === "email" ? "WELCOME BACK" : "ENTER VERIFICATION CODE"}
             </span>
 
             <h1>
-              Log in to<br />
-              <em>your account.</em>
+              {step === "email" ? (
+                <>
+                  Log in to<br />
+                  <em>your account.</em>
+                </>
+              ) : (
+                <>
+                  One quick<br />
+                  <em>verification.</em>
+                </>
+              )}
             </h1>
 
             <p>
-              Enter your registered Gmail or email address to log in. We will take you straight to your account.
+              {step === "email"
+                ? "Enter your registered Gmail or email address. We'll send a 6-digit verification code to securely sign you in."
+                : `We sent a 6-digit code to ${email}. Enter it below to securely log in.`}
             </p>
 
-            <form onSubmit={(e) => void handleLogin(e)}>
-              <label className="form-label" htmlFor="login-email">GMAIL / EMAIL ADDRESS</label>
-              <div className="auth-input-wrap">
-                <Mail className="auth-input-icon" size={18} />
-                <input
-                  id="login-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email (e.g. name@gmail.com)"
-                  required
-                  autoComplete="email"
-                  aria-label="Email address"
-                  className="form-input"
-                />
-              </div>
-              <button
-                id="login-submit-btn"
-                className="btn btn-primary btn-full"
-                disabled={busy || !email.trim() || !email.includes("@")}
-              >
-                {busy ? "Logging in…" : "Log in"}{" "}
-                <ArrowRight size={18} />
-              </button>
-            </form>
+            {/* ── Step 1: Email Form ─────────────────── */}
+            {step === "email" ? (
+              <form onSubmit={(e) => void handleRequestOtp(e)}>
+                <label className="form-label" htmlFor="login-email">GMAIL / EMAIL ADDRESS</label>
+                <div className="auth-input-wrap">
+                  <Mail className="auth-input-icon" size={18} />
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email (e.g. name@gmail.com)"
+                    required
+                    autoComplete="email"
+                    aria-label="Email address"
+                    className="form-input"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  id="login-submit-btn"
+                  className="btn btn-primary btn-full"
+                  disabled={busy || !email.trim() || !email.includes("@")}
+                >
+                  {busy ? "Sending code…" : "Continue with email"}{" "}
+                  <ArrowRight size={18} />
+                </button>
+              </form>
+            ) : (
+              /* ── Step 2: OTP Verification Form ──────── */
+              <form onSubmit={(e) => void handleVerifyOtp(e)}>
+                <label className="form-label" htmlFor="login-otp-input">6-DIGIT VERIFICATION CODE</label>
+                <div className="auth-input-wrap">
+                  <input
+                    id="login-otp-input"
+                    className="otp-input"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder="• • • • • •"
+                    autoFocus
+                    required
+                    aria-label="6-digit verification code"
+                  />
+                </div>
+                <button
+                  id="login-verify-btn"
+                  className="btn btn-primary btn-full"
+                  disabled={busy || code.length !== 6}
+                >
+                  {busy ? "Verifying…" : "Verify & Log in"}{" "}
+                  <ArrowRight size={18} />
+                </button>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "14px", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="auth-text-button"
+                    style={{ margin: 0 }}
+                    onClick={() => {
+                      setStep("email");
+                      setCode("");
+                      setError("");
+                    }}
+                  >
+                    ← Use different email
+                  </button>
+
+                  <button
+                    type="button"
+                    className="auth-text-button"
+                    style={{ margin: 0 }}
+                    onClick={() => void handleResendCode()}
+                    disabled={busy || resendCooldown > 0}
+                  >
+                    {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
+                  </button>
+                </div>
+              </form>
+            )}
 
             {error && (
               <div className="form-error" role="alert" style={{ marginTop: "14px" }}>

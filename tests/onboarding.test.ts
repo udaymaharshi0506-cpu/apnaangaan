@@ -407,8 +407,13 @@ test("Auth: Email login allows existing signed-up users to log in directly witho
     consent: true,
   }, cookie);
 
-  // Now log in with JUST email
-  const loginRes = await call("auth/login", "POST", { email: existingEmail });
+  // Test that attempting login without OTP code is strictly rejected (400)
+  const noOtpRes = await call("auth/login", "POST", { email: existingEmail });
+  assert.equal(noOtpRes.status, 400);
+
+  // Now log in with email and verified OTP code
+  await call("auth/otp/request", "POST", { email: existingEmail, type: "login" });
+  const loginRes = await call("auth/login", "POST", { email: existingEmail, code: "123456" });
   assert.equal(loginRes.status, 200);
   const loginData = await loginRes.json();
   assert.equal(loginData.user.email, existingEmail);
@@ -416,7 +421,7 @@ test("Auth: Email login allows existing signed-up users to log in directly witho
   assert.equal(loginData.user.needsOnboarding, false); // Directly to home, no onboarding details requested again!
 
   // Now test an unregistered email
-  const unregRes = await call("auth/login", "POST", { email: unregisteredEmail });
+  const unregRes = await call("auth/login", "POST", { email: unregisteredEmail, code: "123456" });
   assert.equal(unregRes.status, 404);
   const unregData = await unregRes.json();
   assert.ok(unregData.error.includes("No account found"));

@@ -79,7 +79,8 @@ test("Session & logout: logout revokes access and refresh tokens server-side, cl
   assert.equal(refreshAfter.status, 401);
 
   // 5. Logout with ONLY the access cookie (no refresh cookie) also revokes the session server-side
-  const loginRes = await call("auth/login", "POST", { email });
+  await call("auth/otp/request", "POST", { email, type: "login" });
+  const loginRes = await call("auth/login", "POST", { email, code: "123456" });
   assert.equal(loginRes.status, 200);
   const secondAccess = cookieFrom(loginRes, "aangan_access");
   const secondRefresh = cookieFrom(loginRes, "aangan_refresh");

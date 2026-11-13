@@ -189,7 +189,7 @@ test("real route handlers keep seeker and owner contact details separated", asyn
   assert.equal((await call("admin/dashboard/stats", "GET", undefined, ownerCookie)).status, 403);
   assert.equal((await call(`admin/properties/${createdProp.id}/verify`, "PATCH", { action: "approve" }, ownerCookie)).status, 403);
   assert.equal((await call("profile", "PATCH", { role: "admin" }, ownerCookie)).status, 403);
-  assert.equal((await call("auth/login", "POST", { email: DEFAULT_ADMIN_EMAIL })).status, 403);
+  assert.equal((await call("auth/login", "POST", { email: DEFAULT_ADMIN_EMAIL, code: "123456" })).status, 403);
   assert.equal((await call("auth/otp/request", "POST", { email: DEFAULT_ADMIN_EMAIL })).status, 403);
 
   // Cross-user IDOR protection (403)
