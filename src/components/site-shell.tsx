@@ -22,17 +22,15 @@ function formatRelativeTime(dateString: string) {
 }
 
 export function Brand({ light = false }: { light?: boolean }) {
-  return <Link href="/" aria-label="Aangan home" className={`brand ${light ? "brand-light" : ""}`}>
+  return <Link href="/" aria-label="Apnaangaan home" className={`brand ${light ? "brand-light" : ""}`}>
     <span className="brand-mark"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M5 34V18C5 9.7 11.7 3 20 3s15 6.7 15 15v16" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"/><path d="M13 34V19a7 7 0 0 1 14 0v15" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"/><path d="M4 34h32" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"/><circle cx="20" cy="19" r="2.5" fill="var(--accent)"/></svg></span>
-    <span className="brand-word">aangan<span>.</span></span>
+    <span className="brand-word">apnaangaan<span>.</span></span>
   </Link>;
 }
 
 const navLinks = [
-  { label: "Buy", href: "/search?category=buy_home" },
-  { label: "Rent", href: "/search?category=rent_home" },
-  { label: "PG & Co-living", href: "/search?category=rent_pg" },
-  { label: "Commercial", href: "/search?category=rent_commercial" },
+  { label: "Rent a Home", href: "/search" },
+  { label: "How It Works", href: "/privacy" },
 ];
 
 export function SiteShell({ children }: { children: ReactNode }) {
@@ -69,15 +67,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
     setNotificationsOpen(false);
   }, [pathname]);
 
-  // Global Route Guard: prevent users who haven't completed onboarding from bypassing /setup
-  useEffect(() => {
-    if (!loading && user?.needsOnboarding) {
-      const allowedPaths = ["/setup", "/login", "/signup", "/privacy"];
-      if (!allowedPaths.includes(pathname)) {
-        router.replace(`/setup?next=${encodeURIComponent(pathname)}`);
-      }
-    }
-  }, [loading, user?.needsOnboarding, pathname, router]);
 
   if (isAdmin) return <>{children}</>;
 
@@ -87,11 +76,11 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   const currentNavLinks = isUserAdmin ? [
     { label: "Admin Workspace", href: "/admin" },
-    { label: "Explore Spaces", href: "/search" },
+    { label: "Rent a Home", href: "/search" },
   ] : isUserOwner ? [
     { label: "Owner Dashboard", href: "/owner" },
-    { label: "Post a Property", href: "/post-property" },
-    { label: "Explore Spaces", href: "/search" },
+    { label: "Post a Rental", href: "/post-property" },
+    { label: "Rent a Home", href: "/search" },
   ] : navLinks;
 
   const mobileTabs = isUserAdmin ? [
@@ -173,7 +162,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
                       <div className="notifications-empty">
                         <Bell size={26} strokeWidth={1.5} className="empty-bell-icon" />
                         <p>No notifications yet</p>
-                        <span>Updates on your inquiries, spaces, and viewings will appear here.</span>
+                        <span>Updates on your inquiries, rental homes, and viewings will appear here.</span>
                       </div>
                     ) : (
                       <div className="notifications-items-list">
@@ -235,10 +224,10 @@ export function SiteShell({ children }: { children: ReactNode }) {
     <div className="site-content">{children}</div>
     {!isAuth && <footer className="site-footer"><div className="container footer-grid">
       <div className="footer-about"><Brand light/><p>A more thoughtful way to find your place. Real homes, verified details, and a team that puts your privacy first.</p><span className="footer-trust"><ShieldCheck size={16}/> Your home search, handled with care.</span></div>
-      <div className="footer-col"><h4>Explore</h4><Link href="/search?category=buy_home">Homes for sale</Link><Link href="/search?category=rent_home">Homes for rent</Link><Link href="/search?category=rent_pg">PG & co-living</Link><Link href="/search?category=rent_commercial">Commercial</Link></div>
+      <div className="footer-col"><h4>Explore</h4><Link href="/search">All rental homes</Link><Link href="/search?bhk=1">1 BHK Rentals</Link><Link href="/search?bhk=2">2 BHK Rentals</Link><Link href="/search?bhk=3">3 BHK Rentals</Link><Link href="/search?q=Villa">Villas & Houses</Link></div>
       <div className="footer-col"><h4>For you</h4>{isUserOwner ? <><Link href="/owner">Owner dashboard</Link><Link href="/post-property">List a property</Link></> : isUserAdmin ? <><Link href="/admin">Admin Workspace</Link><Link href="/admin/leads">Lead Inbox</Link></> : <><Link href="/saved">Saved homes</Link><Link href="/inquiries">My inquiries</Link></>}<Link href="/profile">My profile</Link></div>
-      <div className="footer-col"><h4>Aangan</h4><Link href="/privacy">Privacy policy</Link><Link href="/welcome">How it works</Link><Link href="/admin">Team portal <ArrowUpRight size={13}/></Link><a href="mailto:hello@aangan.example">Get in touch</a></div>
-    </div><div className="container footer-bottom"><span>© {new Date().getFullYear()} Aangan. Made for the place you call home.</span><span>Thoughtfully built for India <span className="footer-heart">♥</span></span></div></footer>}
+      <div className="footer-col"><h4>Apnaangaan</h4><Link href="/privacy">Privacy policy</Link><Link href="/welcome">How it works</Link><Link href="/admin">Team portal <ArrowUpRight size={13}/></Link><a href="mailto:hello@apnaangaan.in">Get in touch</a></div>
+    </div><div className="container footer-bottom"><span>© {new Date().getFullYear()} Apnaangaan. Made for the place you call home.</span><span>Thoughtfully built for India <span className="footer-heart">♥</span></span></div></footer>}
     {!isPropertyDetail && !isAuth && (
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
         {mobileTabs.map(({ label, href, Icon }) => {

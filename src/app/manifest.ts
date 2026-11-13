@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Aangan — A more thoughtful way home",
-    short_name: "Aangan",
+    name: "Apnaangaan — A more thoughtful way home",
+    short_name: "Apnaangaan",
     description: "Discover verified homes and spaces in India, with your privacy protected.",
     start_url: "/",
     display: "standalone",

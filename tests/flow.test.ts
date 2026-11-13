@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { hasRole, publicSelf, verifyAdminCode } from "../src/lib/auth";
+import { detectContactInfo } from "../src/lib/contact-filter";
 import {
   serializeAdminLead,
   serializeCustomerLead,
@@ -49,10 +50,12 @@ test("Role separation: hasRole correctly identifies customer, owner, and admin",
   assert.equal(hasRole(ownerUser, "owner"), true);
   assert.equal(hasRole(ownerUser, "admin"), false);
 
-  // Admin checks
+  // Admin checks (requires BOTH role === "admin" and "admin" in roles)
   assert.equal(hasRole(adminUser, "customer"), true);
   assert.equal(hasRole(adminUser, "owner"), true);
   assert.equal(hasRole(adminUser, "admin"), true);
+  assert.equal(hasRole({ ...adminUser, role: "customer" } as User, "admin"), false);
+  assert.equal(hasRole({ ...customerUser, roles: ["customer", "admin"] } as User, "admin"), false);
 
   // publicSelf checks
   const publicSeeker = publicSelf(customerUser);
@@ -105,19 +108,30 @@ test("Auth flow: timingSafeEqual with hash verification handles mismatched buffe
 // ─────────────────────────────────────────────────────────────
 // 3. Property Form Input Sanitization & Anti-Crash Guards
 // ─────────────────────────────────────────────────────────────
-test("Property posting: Contact detail detection rejects actual phone numbers but preserves street/plot addresses", () => {
-  // Regex from api-handler rejectContactDetails
-  const phonePattern = /(?:(?:\+?91[\s.-]?)?[6-9]\d{9}|\b\d{5}[\s.-]?\d{5}\b)/;
+test("Property posting: Contact detail detection rejects phone numbers, word-numbers, emails, WhatsApp, and links while preserving addresses", () => {
+  // Phone digits & obfuscated formats
+  assert.equal(detectContactInfo("Call me at 9876543210 for quick viewing").blocked, true);
+  assert.equal(detectContactInfo("Contact +919876543210").blocked, true);
+  assert.equal(detectContactInfo("Reach 9 8 7 6 5 4 3 2 1 0").blocked, true);
+  assert.equal(detectContactInfo("Number is nine eight seven six five four three two one zero").blocked, true);
+  assert.equal(detectContactInfo("nine eight 76543210").blocked, true);
 
-  // Real phone numbers must be rejected
-  assert.match("Call me at 9876543210 for quick viewing", phonePattern);
-  assert.match("Contact +919876543210", phonePattern);
-  assert.match("Call 98765 43210", phonePattern);
+  // Emails & @ / dot com obfuscation
+  assert.equal(detectContactInfo("Email owner@example.com").blocked, true);
+  assert.equal(detectContactInfo("Mail john at gmail dot com").blocked, true);
+  assert.equal(detectContactInfo("Reach me @rohan_homes").blocked, true);
 
-  // Street, plot, sector numbers must NOT be rejected
-  assert.doesNotMatch("Near Sector 45, Plot 12, Indiranagar 100 Feet Road", phonePattern);
-  assert.doesNotMatch("Flat 302, 3rd Floor, Brigade Road", phonePattern);
-  assert.doesNotMatch("Spacious 1200 sqft apartment with 2 balconies", phonePattern);
+  // Messaging mentions & external links
+  assert.equal(detectContactInfo("Ping on WhatsApp for video").blocked, true);
+  assert.equal(detectContactInfo("Check what's app or wa.me/919876543210").blocked, true);
+  assert.equal(detectContactInfo("Visit https://myrentals.in for pics").blocked, true);
+  assert.equal(detectContactInfo("See details on homes dot com").blocked, true);
+
+  // Street, plot, sector numbers, and normal prose must NOT be rejected
+  assert.equal(detectContactInfo("Near Sector 45, Plot 12, Indiranagar 100 Feet Road").blocked, false);
+  assert.equal(detectContactInfo("Flat 302, 3rd Floor, Brigade Road, Bengaluru 560001").blocked, false);
+  assert.equal(detectContactInfo("Spacious 1200 sqft apartment with 2 balconies. Located at Koramangala. In quiet lane.").blocked, false);
+  assert.equal(detectContactInfo("Available @ 35000 per month with 11-month lease").blocked, false);
 });
 
 test("Property posting: Type coercion handles string inputs from HTML forms", () => {
@@ -193,9 +207,9 @@ test("Moderation: Admin verification handles rejection reason and preserves KYC 
   const propertyMock = {
     id: "123e4567-e89b-12d3-a456-426614174000",
     title: "3 BHK Villa in Whitefield",
-    category: "buy_home",
+    category: "rent_home",
     propertyType: "Villa",
-    price: 15000000,
+    price: 65000,
     priceType: "negotiable",
     liveSelfieUrl: "https://example.com/selfie.jpg",
     aadhaarCardUrl: "https://example.com/aadhaar.jpg",

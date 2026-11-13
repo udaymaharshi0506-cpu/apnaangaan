@@ -388,4 +388,37 @@ test("Owner Post Property: Schema accepts null coOwners, null reraNumber, and em
   assert.equal(payload.images.length >= 5, true);
 });
 
+test("Auth: Email login allows existing signed-up users to log in directly without onboarding prompts, and rejects unregistered emails", async () => {
+  const existingEmail = "onboarded_user_test@apnaangaan.in";
+  const unregisteredEmail = "unregistered_random_user_99@apnaangaan.in";
+
+  // First create a signed up user via OTP and complete onboarding
+  await call("auth/otp/request", "POST", { email: existingEmail });
+  const verifyRes = await call("auth/otp/verify", "POST", { email: existingEmail, code: "123456" });
+  assert.equal(verifyRes.status, 200);
+  const cookie = cookieFrom(verifyRes, "aangan_access");
+
+  // Complete profile with consent
+  await call("profile", "PATCH", {
+    name: "Existing User",
+    phone: "+919876543201",
+    location: "Bengaluru, Karnataka",
+    role: "customer",
+    consent: true,
+  }, cookie);
+
+  // Now log in with JUST email
+  const loginRes = await call("auth/login", "POST", { email: existingEmail });
+  assert.equal(loginRes.status, 200);
+  const loginData = await loginRes.json();
+  assert.equal(loginData.user.email, existingEmail);
+  assert.equal(loginData.user.name, "Existing User");
+  assert.equal(loginData.user.needsOnboarding, false); // Directly to home, no onboarding details requested again!
+
+  // Now test an unregistered email
+  const unregRes = await call("auth/login", "POST", { email: unregisteredEmail });
+  assert.equal(unregRes.status, 404);
+  const unregData = await unregRes.json();
+  assert.ok(unregData.error.includes("No account found"));
+});
 

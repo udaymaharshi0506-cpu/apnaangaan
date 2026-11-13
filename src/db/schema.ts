@@ -1,15 +1,16 @@
-import { bigint, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, pgView, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
-export const propertyCategory = pgEnum("property_category", ["buy_home", "rent_home", "rent_pg", "rent_commercial"]);
-export const propertyStatus = pgEnum("property_status", ["pending_review", "live", "paused", "sold", "rented", "rejected"]);
+export const propertyCategory = pgEnum("property_category", ["rent_home"]);
+export const propertyStatus = pgEnum("property_status", ["draft", "pending_review", "live", "paused", "sold", "rented", "rejected"]);
 export const leadStatus = pgEnum("lead_status", ["new", "contacted", "meeting_scheduled", "closed_won", "closed_lost"]);
 export const meetingMode = pgEnum("meeting_mode", ["call", "site_visit"]);
-export const meetingStatus = pgEnum("meeting_status", ["proposed", "confirmed", "completed", "cancelled"]);
+export const meetingStatus = pgEnum("meeting_status", ["proposed", "confirmed", "rescheduled", "completed", "cancelled"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   phone: varchar("phone", { length: 20 }).unique(),
-  email: varchar("email", { length: 255 }).unique(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
   name: varchar("name", { length: 150 }),
   city: varchar("city", { length: 120 }),
   location: varchar("location", { length: 255 }),
@@ -20,6 +21,7 @@ export const users = pgTable("users", {
   roles: jsonb("roles").$type<Array<"customer" | "owner" | "admin">>().notNull().default(["customer"]),
   otpVerifiedAt: timestamp("otp_verified_at", { withTimezone: true }),
   consentAt: timestamp("consent_at", { withTimezone: true }),
+  lastLogin: timestamp("last_login", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -96,9 +98,45 @@ export const leads = pgTable("leads", {
   moveInTimeline: varchar("move_in_timeline", { length: 100 }),
   confirmedPhone: varchar("confirmed_phone", { length: 20 }),
   seekerNotes: text("seeker_notes"),
+  ownerResponse: varchar("owner_response", { length: 50 }).notNull().default("pending"),
+  ownerRespondedAt: timestamp("owner_responded_at", { withTimezone: true }),
+  whatsappMessageId: varchar("whatsapp_message_id", { length: 100 }),
+  whatsappStatus: varchar("whatsapp_status", { length: 50 }).default("pending"),
+  whatsappReminderSentAt: timestamp("whatsapp_reminder_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("leads_status_idx").on(table.status), index("leads_customer_idx").on(table.customerId), index("leads_owner_idx").on(table.ownerId), uniqueIndex("leads_customer_property_unique").on(table.customerId, table.propertyId)]);
+
+export const ownerInquiryView = pgView("owner_inquiry_view", {
+  id: uuid("id").primaryKey(),
+  propertyId: uuid("property_id").notNull(),
+  propertyName: varchar("property_name", { length: 200 }).notNull(),
+  ownerId: uuid("owner_id").notNull(),
+  occupantsCount: varchar("occupants_count", { length: 50 }),
+  tenantType: varchar("tenant_type", { length: 100 }),
+  profession: varchar("profession", { length: 100 }),
+  groupComposition: varchar("group_composition", { length: 50 }),
+  status: leadStatus("status").notNull(),
+  ownerResponse: varchar("owner_response", { length: 50 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}).as(sql`
+  SELECT
+    l.id AS id,
+    l.property_id AS property_id,
+    p.title AS property_name,
+    l.owner_id AS owner_id,
+    l.occupants_count AS occupants_count,
+    l.tenant_type AS tenant_type,
+    l.profession AS profession,
+    COALESCE(l.group_gender, 'N/A') AS group_composition,
+    l.status AS status,
+    COALESCE(l.owner_response, 'pending') AS owner_response,
+    l.created_at AS created_at,
+    l.updated_at AS updated_at
+  FROM leads l
+  JOIN properties p ON l.property_id = p.id
+`);
 
 export const meetings = pgTable("meetings", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -185,6 +223,7 @@ export const uploadedImages = pgTable("uploaded_images", {
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
+export type OwnerInquiry = typeof ownerInquiryView.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;
 export type UploadedImage = typeof uploadedImages.$inferSelect;
 

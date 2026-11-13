@@ -3,8 +3,8 @@ import { users } from "@/db/schema";
 import { hash } from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
 
-export const DEFAULT_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@aangan.com";
-export const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "AanganSecure2026!";
+export const DEFAULT_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@apnaangaan.in";
+export const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "ApnaangaanSecure2026!";
 
 /** Ensure the administrative account exists so authorized team members can log into /admin. */
 export async function ensureAdminAccount() {
@@ -22,7 +22,7 @@ export async function ensureAdminAccount() {
         .insert(users)
         .values({
           email: adminEmail,
-          name: "Aangan Admin",
+          name: "Apnaangaan Admin",
           role: "admin",
           roles: ["customer", "owner", "admin"],
           passwordHash,

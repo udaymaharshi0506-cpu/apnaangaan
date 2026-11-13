@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -11,6 +11,7 @@
     "test:connections": "tsx scripts/test-connections.ts",
     "test:uploads": "tsx scripts/test-uploads.ts",
     "db:secure": "tsx scripts/fix-supabase-rls.ts",
+    "db:backup": "tsx scripts/backup-db.ts",
     "verify": "tsx scripts/verify-full-app.ts"
   },
   "dependencies": {

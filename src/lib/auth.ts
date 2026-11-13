@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { db } from "@/db";
 import { refreshTokens, users, type User } from "@/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
@@ -30,7 +30,15 @@ async function signedToken(subject: string, type: string, expiration: string, jt
 }
 
 export async function createTestToken(userId: string) {
-  return signedToken(userId, "access", "1h");
+  const id = randomUUID();
+  const token = await signedToken(userId, "access", "1h", id);
+  await db.insert(refreshTokens).values({
+    id,
+    userId,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
+  return token;
 }
 
 async function verifiedToken(token: string, expectedType: string) {
@@ -39,14 +47,32 @@ async function verifiedToken(token: string, expectedType: string) {
   return payload;
 }
 
+async function resolveUserFromAccessToken(token: string | undefined): Promise<User | null> {
+  if (!token) return null;
+  const payload = await verifiedToken(token, "access");
+  if (!payload.jti) return null;
+  const [session] = await db
+    .select({ id: refreshTokens.id })
+    .from(refreshTokens)
+    .where(
+      and(
+        eq(refreshTokens.id, payload.jti),
+        eq(refreshTokens.userId, payload.sub!),
+        isNull(refreshTokens.revokedAt),
+        gt(refreshTokens.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  if (!session) return null;
+  const [user] = await db.select().from(users).where(eq(users.id, payload.sub!)).limit(1);
+  return user || null;
+}
+
 export async function getAuthUser(request: Request): Promise<User | null> {
   try {
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     const token = bearer || cookieValue(request.headers.get("cookie"), ACCESS_COOKIE);
-    if (!token) return null;
-    const payload = await verifiedToken(token, "access");
-    const [user] = await db.select().from(users).where(eq(users.id, payload.sub!)).limit(1);
-    return user || null;
+    return await resolveUserFromAccessToken(token);
   } catch (err) {
     console.error("[Auth] getAuthUser error:", err);
     return null;
@@ -56,18 +82,30 @@ export async function getAuthUser(request: Request): Promise<User | null> {
 export async function getServerUser(): Promise<User | null> {
   try {
     const token = (await cookies()).get(ACCESS_COOKIE)?.value;
-    if (!token) return null;
-    const payload = await verifiedToken(token, "access");
-    const [user] = await db.select().from(users).where(eq(users.id, payload.sub!)).limit(1);
-    return user || null;
+    return await resolveUserFromAccessToken(token);
   } catch { return null; }
 }
 
-export const hasRole = (user: User | null, role: "customer" | "owner" | "admin") => !!user && user.roles.includes(role);
+export const hasRole = (user: User | null, role: "customer" | "owner" | "admin") => {
+  if (!user || !Array.isArray(user.roles)) return false;
+  if (role === "admin") {
+    return user.role === "admin" && user.roles.includes("admin");
+  }
+  return user.roles.includes(role);
+};
 
 export function publicSelf(user: User) {
-  const isAdmin = user.roles.includes("admin") || user.role === "admin";
+  const isAdmin = hasRole(user, "admin");
   const userLoc = user.location || user.city;
+  const isProfileComplete = Boolean(
+    user.name &&
+    user.name.trim().length >= 2 &&
+    user.phone &&
+    user.phone.trim().length >= 10 &&
+    userLoc &&
+    userLoc.trim().length >= 2
+  );
+  const hasOnboarded = Boolean(user.consentAt);
   return {
     id: user.id,
     phone: user.phone,
@@ -77,19 +115,24 @@ export function publicSelf(user: User) {
     location: user.location || user.city,
     role: user.role,
     roles: user.roles,
-    consentAt: user.consentAt,
-    needsOnboarding: isAdmin ? false : (!user.name || !user.consentAt || !user.phone || !userLoc),
+    lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+    consentAt: user.consentAt ? user.consentAt.toISOString() : null,
+    createdAt: user.createdAt ? user.createdAt.toISOString() : null,
+    needsOnboarding: isAdmin ? false : !hasOnboarded,
   };
 }
 
 export async function attachSession(response: NextResponse, user: User) {
   const id = randomUUID();
-  const access = await signedToken(user.id, "access", "15m");
+  const access = await signedToken(user.id, "access", "15m", id);
   const refresh = await signedToken(user.id, "refresh", "30d", id);
   await db.insert(refreshTokens).values({ id, userId: user.id, tokenHash: createHash("sha256").update(refresh).digest("hex"), expiresAt: new Date(Date.now() + refreshSeconds * 1000) });
   response.cookies.set(ACCESS_COOKIE, access, cookieOptions(accessSeconds));
   response.cookies.set(REFRESH_COOKIE, refresh, cookieOptions(refreshSeconds));
   response.cookies.delete(ADMIN_CHALLENGE_COOKIE);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
   return response;
 }
 
@@ -108,16 +151,38 @@ export async function rotateSession(request: Request) {
 }
 
 export async function clearSession(request: Request, response: NextResponse) {
-  const token = cookieValue(request.headers.get("cookie"), REFRESH_COOKIE);
-  if (token) {
+  const sessionIds = new Set<string>();
+  const cookieHeader = request.headers.get("cookie");
+  const refreshToken = cookieValue(cookieHeader, REFRESH_COOKIE);
+  const bearerToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const accessToken = bearerToken || cookieValue(cookieHeader, ACCESS_COOKIE);
+
+  if (refreshToken) {
     try {
-      const payload = await verifiedToken(token, "refresh");
-      if (payload.jti) await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.id, payload.jti));
-    } catch { /* Expired cookie can still be cleared. */ }
+      const payload = await verifiedToken(refreshToken, "refresh");
+      if (payload.jti) sessionIds.add(payload.jti);
+    } catch { /* Expired or invalid cookie can still be cleared. */ }
   }
-  response.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
-  response.cookies.set(REFRESH_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
-  response.cookies.set(ADMIN_CHALLENGE_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true });
+  if (accessToken) {
+    try {
+      const payload = await verifiedToken(accessToken, "access");
+      if (payload.jti) sessionIds.add(payload.jti);
+    } catch { /* Expired or invalid cookie can still be cleared. */ }
+  }
+
+  for (const sessionId of sessionIds) {
+    await db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.id, sessionId), isNull(refreshTokens.revokedAt)));
+  }
+
+  response.cookies.set(ACCESS_COOKIE, "", cookieOptions(0));
+  response.cookies.set(REFRESH_COOKIE, "", cookieOptions(0));
+  response.cookies.set(ADMIN_CHALLENGE_COOKIE, "", cookieOptions(0));
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
   return response;
 }
 

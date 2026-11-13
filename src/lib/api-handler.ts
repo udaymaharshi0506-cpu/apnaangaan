@@ -1,11 +1,25 @@
 import { db } from "@/db";
-import { adminCallLogs, favorites, leadEvents, leads, meetings, notifications, otpChallenges, properties, savedSearches, uploadedImages, users, type Lead, type Property, type User } from "@/db/schema";
+import { adminCallLogs, favorites, leadEvents, leads, meetings, notifications, otpChallenges, ownerInquiryView, properties, savedSearches, uploadedImages, users, type Lead, type Property, type User } from "@/db/schema";
 import { attachAdminChallenge, attachSession, clearSession, getAuthUser, getPendingAdmin, hasRole, publicSelf, rotateSession, verifyAdminCode } from "@/lib/auth";
-import { findProperties, getProperty } from "@/lib/queries";
+import { findProperties, getProperty, getPropertyForLeadCreation, getUnavailablePropertyStatus, ownerPropertyColumns, publicPropertyColumns } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
-import { serializeAdminLead, serializeCustomerLead, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
+import { ACTIVE_MEETING_STATUSES, canTransitionMeetingStatus, formatMeetingStatus, getSlotConflictBounds, validateVisitSlot } from "@/lib/scheduling";
+import { serializeAdminLead, serializeAdminProperty, serializeCustomerLead, serializeOwnerInquiry, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
+import { detectContactInfo, findFirstContactViolation } from "@/lib/contact-filter";
+import { normalizeWhitespace, parseIndianPhone, parseIndianPinCode } from "@/lib/input-validation";
+import { filterLocationSuggestions } from "@/lib/search-utils";
+import { validateImageUploadBytes } from "@/lib/image-validation";
+import {
+  BHK_OPTIONS_BY_VERTICAL,
+  LISTING_LIMITS,
+  MAX_LISTING_IMAGES,
+  normalizeFromAllowlist,
+  PROPERTY_TYPES_BY_VERTICAL,
+  validateVerticalRules,
+} from "@/lib/listing-validation";
+import { handleOwnerResponse, sendOwnerInterestWhatsAppWithRetry } from "@/lib/whatsapp";
 import { compare } from "bcryptjs";
-import { and, count, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -16,7 +30,12 @@ import { z } from "zod";
 class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 function fail(status: number, message: string): never { throw new HttpError(status, message); }
 const uuid = z.string().uuid();
-const respond = (data: unknown, status = 200) => NextResponse.json(data, { status });
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+const respond = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: NO_STORE_HEADERS });
 const safeNumber = (value: string | null) => value !== null && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined;
 const pageFrom = (request: NextRequest) => Math.max(1, Math.min(10000, Number(request.nextUrl.searchParams.get("page")) || 1));
 
@@ -45,9 +64,78 @@ async function requireRole(request: NextRequest, role: "customer" | "owner" | "a
 }
 function validId(id: string) { if (!uuid.safeParse(id).success) fail(400, "Invalid ID."); return id; }
 async function latestMeeting(leadId: string) {
-  const [meeting] = await db.select().from(meetings).where(eq(meetings.leadId, leadId)).orderBy(desc(meetings.createdAt)).limit(1);
+  const [meeting] = await db
+    .select({
+      id: meetings.id,
+      scheduledAt: meetings.scheduledAt,
+      mode: meetings.mode,
+      status: meetings.status,
+    })
+    .from(meetings)
+    .where(eq(meetings.leadId, leadId))
+    .orderBy(desc(meetings.createdAt))
+    .limit(1);
   return meeting || null;
 }
+
+async function assertNoSlotConflict(
+  lead: { id: string; propertyId: string; customerId: string },
+  targetTime: Date,
+  excludeMeetingId?: string
+) {
+  const { windowStart, windowEnd } = getSlotConflictBounds(targetTime);
+  const conditions = [
+    inArray(meetings.status, ACTIVE_MEETING_STATUSES),
+    gt(meetings.scheduledAt, windowStart),
+    lt(meetings.scheduledAt, windowEnd),
+    or(eq(leads.propertyId, lead.propertyId), eq(leads.customerId, lead.customerId)),
+  ];
+  if (excludeMeetingId) {
+    conditions.push(ne(meetings.id, excludeMeetingId));
+  }
+  const [conflict] = await db
+    .select({ id: meetings.id, scheduledAt: meetings.scheduledAt, propertyId: leads.propertyId })
+    .from(meetings)
+    .innerJoin(leads, eq(meetings.leadId, leads.id))
+    .where(and(...conditions))
+    .limit(1);
+
+  if (conflict) {
+    const scope = conflict.propertyId === lead.propertyId ? "this property" : "this customer";
+    fail(409, `Another visit or call is already booked for ${scope} within 60 minutes of that time. Choose a different slot.`);
+  }
+}
+
+/** Explicit DB column allowlist for customer-facing lead queries: projects out phone, email, whatsapp, ownerId, customerId, and adminNotes. */
+const customerLeadColumns = {
+  id: leads.id,
+  status: leads.status,
+  preferredContactTime: leads.preferredContactTime,
+  occupantsCount: leads.occupantsCount,
+  tenantType: leads.tenantType,
+  profession: leads.profession,
+  groupGender: leads.groupGender,
+  moveInTimeline: leads.moveInTimeline,
+  seekerNotes: leads.seekerNotes,
+  ownerResponse: leads.ownerResponse,
+  createdAt: leads.createdAt,
+  updatedAt: leads.updatedAt,
+} as const;
+
+/** Explicit DB column allowlist for owner inquiry queries via the dedicated owner_inquiry_view (projects out ownerId). */
+const ownerInquiryColumns = {
+  id: ownerInquiryView.id,
+  propertyId: ownerInquiryView.propertyId,
+  propertyName: ownerInquiryView.propertyName,
+  occupantsCount: ownerInquiryView.occupantsCount,
+  tenantType: ownerInquiryView.tenantType,
+  profession: ownerInquiryView.profession,
+  groupComposition: ownerInquiryView.groupComposition,
+  status: ownerInquiryView.status,
+  ownerResponse: ownerInquiryView.ownerResponse,
+  createdAt: ownerInquiryView.createdAt,
+  updatedAt: ownerInquiryView.updatedAt,
+} as const;
 async function sendNotification(userId: string, type: string, message: string, link?: string) {
   try {
     await db.insert(notifications).values({ userId, type, message, link });
@@ -56,96 +144,223 @@ async function sendNotification(userId: string, type: string, message: string, l
   }
 }
 
+const preprocessIntInput = (value: unknown) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.replace(/,/g, "").trim();
+    if (trimmed === "") return null;
+    if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return Number.NaN;
+    return Number(trimmed);
+  }
+  return value;
+};
+
+const requiredInt = (min: number, max: number, label: string) =>
+  z.preprocess(
+    preprocessIntInput,
+    z
+      .number({ error: `${label} must be a whole number.` })
+      .int(`${label} must be a whole number without decimals.`)
+      .min(min, `${label} must be at least ${min.toLocaleString("en-IN")}.`)
+      .max(max, `${label} cannot exceed ${max.toLocaleString("en-IN")}.`)
+  );
+
+const optionalNullableInt = (min: number, max: number, label: string) =>
+  z.preprocess(
+    preprocessIntInput,
+    z
+      .union([
+        z.null(),
+        z
+          .number({ error: `${label} must be a whole number.` })
+          .int(`${label} must be a whole number without decimals.`)
+          .min(min, `${label} must be at least ${min.toLocaleString("en-IN")}.`)
+          .max(max, `${label} cannot exceed ${max.toLocaleString("en-IN")}.`),
+      ])
+      .optional()
+  );
+
+const cleanText = (max: number) => z.string().transform(normalizeWhitespace).pipe(z.string().max(max));
+const requiredCleanText = (min: number, max: number, minMsg?: string) =>
+  z.string().transform(normalizeWhitespace).pipe(minMsg ? z.string().min(min, minMsg).max(max) : z.string().min(min).max(max));
+
 const phoneSchema = z.object({ phone: z.string().regex(/^\+91[6-9]\d{9}$/, "Enter a valid Indian mobile number.") });
 const propertyRawFields = {
-  category: z.enum(["buy_home", "rent_home", "rent_pg", "rent_commercial"]),
-  propertyType: z.string().trim().min(1).max(60),
-  title: z.string().trim().max(180).optional(),
-  description: z.string().trim().max(5000).optional(),
-  price: z.coerce.number().int().positive("Price must be a positive number.").max(100000000000),
+  category: z
+    .string()
+    .optional()
+    .transform((val) => (val !== undefined ? normalizeWhitespace(val).toLowerCase() : undefined))
+    .refine(
+      (val) => {
+        if (val === undefined) return true;
+        if (["buy", "buy_home", "sale", "purchase", "pg", "rent_pg", "paying_guest", "paying guest", "coliving", "co-living", "commercial", "rent_commercial", "office", "retail", "shop"].includes(val)) {
+          return false;
+        }
+        return val === "rent_home" || val === "rent" || val === "home" || val === "residential";
+      },
+      "Only residential home rentals (rent_home) are supported. Buy, PG, and Commercial listings are rejected."
+    )
+    .transform((val) => (val !== undefined ? ("rent_home" as const) : undefined)),
+  transactionType: z
+    .string()
+    .optional()
+    .refine(
+      (val) => val === undefined || ["rent", "rental"].includes(val.toLowerCase().trim()),
+      "Only rent transaction type is supported. Buy listings are rejected."
+    ),
+  propertyType: requiredCleanText(1, 60).refine(
+    (val) => {
+      if (/\b(shop|office|retail|commercial|pg|paying guest|hostel|warehouse|showroom|industrial|plot|land)\b/i.test(val)) {
+        return false;
+      }
+      return Boolean(normalizeFromAllowlist(val, PROPERTY_TYPES_BY_VERTICAL.rent_home));
+    },
+    `Invalid property type. Only residential homes (${PROPERTY_TYPES_BY_VERTICAL.rent_home.join(", ")}) are allowed.`
+  ),
+  title: cleanText(180).optional(),
+  description: cleanText(5000).optional(),
+  price: requiredInt(LISTING_LIMITS.rent_home.minPrice, LISTING_LIMITS.rent_home.maxPrice, "Monthly rent"),
   priceType: z.enum(["fixed", "negotiable"]).optional(),
-  address: z.string().trim().min(2, "Address must be at least 2 characters.").max(500),
-  city: z.string().trim().min(2).max(100),
-  locality: z.string().trim().min(2).max(120),
-  pinCode: z.string().trim().max(10).nullable().optional(),
-  landmark: z.string().trim().max(255).nullable().optional(),
+  address: requiredCleanText(2, 500, "Address must be at least 2 characters."),
+  city: requiredCleanText(2, 100),
+  locality: requiredCleanText(2, 120),
+  pinCode: z
+    .string()
+    .max(16)
+    .nullable()
+    .optional()
+    .transform((val) => {
+      if (val === undefined) return undefined;
+      const cleaned = normalizeWhitespace(String(val ?? "")).replace(/\s+/g, "");
+      return cleaned ? cleaned : null;
+    })
+    .refine((val) => val === undefined || val === null || parseIndianPinCode(val).valid, "PIN code must be a valid 6-digit Indian postal code (e.g. 302020)."),
+  landmark: cleanText(255).nullable().optional(),
   latitude: z.coerce.number().min(-90).max(90).nullable().optional(),
   longitude: z.coerce.number().min(-180).max(180).nullable().optional(),
-  bhkOrRoomType: z.string().trim().min(1).max(50),
-  areaSqft: z.coerce.number().int().positive("Area must be positive.").max(10000000),
-  bathrooms: z.coerce.number().int().min(0).max(100).optional(),
-  floor: z.string().trim().max(30).nullable().optional(),
-  totalFloors: z.coerce.number().int().min(0).max(200).nullable().optional(),
-  propertyAge: z.string().trim().max(50).nullable().optional(),
-  facing: z.string().trim().max(30).nullable().optional(),
+  bhkOrRoomType: requiredCleanText(1, 50),
+  areaSqft: requiredInt(LISTING_LIMITS.rent_home.minAreaSqft, LISTING_LIMITS.rent_home.maxAreaSqft, "Built-up area (sq ft)"),
+  bathrooms: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxBathrooms, "Bathrooms"),
+  floor: cleanText(30).nullable().optional(),
+  totalFloors: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxTotalFloors, "Total floors"),
+  propertyAge: cleanText(50).nullable().optional(),
+  facing: cleanText(30).nullable().optional(),
   furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).optional(),
-  amenities: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
-  images: z.array(z.string().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide photos.").max(25),
-  availabilityDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
-  reraNumber: z.string().trim().max(100).nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
-  deposit: z.coerce.number().int().nonnegative().nullable().optional(),
+  amenities: z.array(requiredCleanText(1, 60)).max(50).optional(),
+  images: z.array(z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).min(1, "Please provide photos.").max(MAX_LISTING_IMAGES, `Maximum ${MAX_LISTING_IMAGES} photos allowed.`),
+  availabilityDate: z.string().nullable().optional().transform((val) => (val === undefined ? undefined : val && normalizeWhitespace(val) ? normalizeWhitespace(val) : null)),
+  reraNumber: cleanText(100).nullable().optional().transform((val) => (val === undefined ? undefined : val ? val : null)),
+  deposit: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxDeposit, "Security deposit"),
   // Owner KYC & identity
-  ownerName: z.string().trim().max(150).optional(),
-  ownerPhone: z.string().trim().max(20).optional(),
+  ownerName: cleanText(150).optional(),
+  ownerPhone: z
+    .string()
+    .max(25)
+    .optional()
+    .transform((val) => {
+      if (val === undefined) return undefined;
+      const clean = normalizeWhitespace(val);
+      if (!clean) return "";
+      const parsed = parseIndianPhone(clean);
+      return parsed.valid ? parsed.e164 : clean;
+    })
+    .refine(
+      (val) => val === undefined || val === "" || parseIndianPhone(val).valid,
+      "Please enter a valid 10-digit Indian mobile number (+91 / starts with 6, 7, 8, or 9)."
+    ),
   liveSelfieUrl: z.string().max(2000).nullable().optional(),
   aadhaarCardUrl: z.string().max(2000).nullable().optional(),
   ownershipType: z.enum(["sole_owner", "co_owner"]).optional(),
-  coOwners: z.string().trim().max(1000).nullable().optional(),
+  coOwners: cleanText(1000).nullable().optional(),
   // Financials & Terms
-  maintenanceStatus: z.string().trim().max(30).nullable().optional(),
-  maintenanceAmount: z.coerce.number().int().nonnegative().nullable().optional(),
-  possessionStatus: z.string().trim().max(50).nullable().optional(),
-  possessionDate: z.string().nullable().optional().transform((val) => val && val.trim() ? val.trim() : null),
-  loanStatus: z.string().trim().max(100).nullable().optional(),
-  lockInPeriod: z.string().trim().max(50).nullable().optional(),
-  noticePeriod: z.string().trim().max(50).nullable().optional(),
-  tenantPreference: z.string().trim().max(100).nullable().optional(),
-  bedCount: z.string().trim().max(50).nullable().optional(),
-  genderPolicy: z.string().trim().max(50).nullable().optional(),
-  houseRules: z.array(z.string().trim().max(100)).optional(),
-  itemizedCharges: z.record(z.string(), z.unknown()).nullable().optional().transform((val) => val ?? {}),
+  maintenanceStatus: cleanText(30).nullable().optional(),
+  maintenanceAmount: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxMaintenance, "Monthly maintenance"),
+  possessionStatus: cleanText(50).nullable().optional(),
+  possessionDate: z.string().nullable().optional().transform((val) => (val === undefined ? undefined : val && normalizeWhitespace(val) ? normalizeWhitespace(val) : null)),
+  loanStatus: cleanText(100).nullable().optional(),
+  lockInPeriod: cleanText(50).nullable().optional(),
+  noticePeriod: cleanText(50).nullable().optional(),
+  tenantPreference: cleanText(100).nullable().optional(),
+  bedCount: cleanText(50).nullable().optional(),
+  genderPolicy: cleanText(50).nullable().optional(),
+  houseRules: z.array(cleanText(100)).optional(),
+  itemizedCharges: z.record(z.string(), z.unknown()).nullable().optional().transform((val) => (val === undefined ? undefined : val ?? {})),
 };
 
 const propertyInput = z.object({
   ...propertyRawFields,
+  category: propertyRawFields.category.transform((v) => v ?? ("rent_home" as const)),
+  status: z.enum(["draft", "pending_review"]).optional(),
   priceType: z.enum(["fixed", "negotiable"]).default("fixed"),
-  bathrooms: z.coerce.number().int().min(0).max(100).default(1),
+  bathrooms: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxBathrooms, "Bathrooms").transform((v) => v ?? 1),
   furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).default("Unfurnished"),
-  amenities: z.array(z.string().trim().min(1).max(60)).default([]),
-  houseRules: z.array(z.string().trim().max(100)).default([]),
+  amenities: z.array(requiredCleanText(1, 60)).default([]),
+  houseRules: z.array(cleanText(100)).default([]),
   itemizedCharges: z.record(z.string(), z.unknown()).default({}),
 }).superRefine((data, context) => {
-  const allowed: Record<string, string[]> = {
-    buy_home: ["Apartment", "Independent house", "Villa", "Plot", "Commercial"],
-    rent_home: ["Apartment", "Independent house", "Villa", "Commercial"],
-    rent_pg: ["PG", "Co-living", "Room"],
-    rent_commercial: ["Office", "Shop", "Showroom", "Warehouse"]
-  };
-  const list = allowed[data.category];
-  if (list && !list.map((s) => s.toLowerCase()).includes(data.propertyType.toLowerCase())) {
-    context.addIssue({ code: "custom", path: ["propertyType"], message: `Property type "${data.propertyType}" does not match ${data.category}. Allowed: ${list.join(", ")}` });
+  const err = validateVerticalRules(data, { isDraft: false });
+  if (err) {
+    context.addIssue({ code: "custom", path: ["propertyType"], message: err });
+  }
+});
+
+const propertyDraftInput = z.object({
+  ...propertyRawFields,
+  category: propertyRawFields.category.transform((v) => v ?? ("rent_home" as const)),
+  status: z.literal("draft"),
+  propertyType: cleanText(60)
+    .optional()
+    .refine(
+      (val) => {
+        if (!val) return true;
+        if (/\b(shop|office|retail|commercial|pg|paying guest|hostel|warehouse|showroom|industrial|plot|land)\b/i.test(val)) {
+          return false;
+        }
+        return Boolean(normalizeFromAllowlist(val, PROPERTY_TYPES_BY_VERTICAL.rent_home));
+      },
+      `Invalid property type. Only residential homes (${PROPERTY_TYPES_BY_VERTICAL.rent_home.join(", ")}) are allowed.`
+    ),
+  address: cleanText(500).optional(),
+  city: cleanText(100).optional(),
+  locality: cleanText(120).optional(),
+  bhkOrRoomType: cleanText(50).optional(),
+  price: optionalNullableInt(LISTING_LIMITS.rent_home.minPrice, LISTING_LIMITS.rent_home.maxPrice, "Monthly rent"),
+  areaSqft: optionalNullableInt(LISTING_LIMITS.rent_home.minAreaSqft, LISTING_LIMITS.rent_home.maxAreaSqft, "Built-up area (sq ft)"),
+  bathrooms: optionalNullableInt(0, LISTING_LIMITS.rent_home.maxBathrooms, "Bathrooms"),
+  priceType: z.enum(["fixed", "negotiable"]).default("fixed"),
+  furnishingStatus: z.enum(["Unfurnished", "Semi-furnished", "Fully furnished"]).default("Unfurnished"),
+  amenities: z.array(requiredCleanText(1, 60)).default([]),
+  images: z.array(z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")).max(MAX_LISTING_IMAGES).default([]),
+  houseRules: z.array(cleanText(100)).default([]),
+  itemizedCharges: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((data, context) => {
+  const err = validateVerticalRules(data, { isDraft: true });
+  if (err) {
+    context.addIssue({ code: "custom", path: ["propertyType"], message: err });
   }
 });
 
 const propertyPatchSchema = z.object({
   ...propertyRawFields,
-  status: z.enum(["paused", "sold", "rented", "live", "pending_review"]),
+  status: z.enum(["draft", "paused", "rented", "live", "pending_review"]),
 }).partial();
 
-function rejectContactDetails(input: Record<string, unknown>) {
-  for (const field of ["title", "description", "address", "city", "locality"]) {
-    const value = input[field];
-    if (typeof value === "string") {
-      if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(value)) {
-        throw new HttpError(422, `Please remove email address from ${field}. Introductions are coordinated privately.`);
-      }
-      const phoneMatch = value.match(/(?:\+?91[\s.-]?)?[6-9]\d{4}[\s.-]?\d{5}\b/);
-      if (phoneMatch) {
-        throw new HttpError(422, `Please remove phone number (${phoneMatch[0]}) from ${field}. Our team coordinates all introductions privately.`);
-      }
-    }
+const DEFAULT_CONTACT_PROTECTED_FIELDS = ["title", "description", "address", "city", "locality", "landmark"] as const;
+
+function rejectContactDetails(input: Record<string, unknown>, fields: readonly string[] = DEFAULT_CONTACT_PROTECTED_FIELDS) {
+  const violation = findFirstContactViolation(input, fields);
+  if (violation) {
+    throw new HttpError(422, `${violation.field}: ${violation.reason}`);
   }
-  if (Array.isArray(input.images) && input.images.some((image) => typeof image === "string" && /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(image))) {
+  if (
+    Array.isArray(input.images) &&
+    input.images.some((image) => {
+      if (typeof image !== "string") return false;
+      const check = detectContactInfo(image);
+      return check.blocked && check.category !== "link";
+    })
+  ) {
     throw new HttpError(422, "Image URLs cannot contain contact details.");
   }
 }
@@ -165,7 +380,7 @@ async function sendResendOtp(email: string, code: string): Promise<{ success: bo
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) return { success: false, error: "RESEND_API_KEY is not configured." };
   try {
-    const from = process.env.RESEND_FROM_EMAIL?.trim() || "Aangan <info@apnaangaan.in>";
+    const from = process.env.RESEND_FROM_EMAIL?.trim() || "Apnaangaan <info@apnaangaan.in>";
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -175,15 +390,15 @@ async function sendResendOtp(email: string, code: string): Promise<{ success: bo
       body: JSON.stringify({
         from,
         to: [email],
-        subject: `${code} is your Aangan verification code`,
+        subject: `${code} is your Apnaangaan verification code`,
         html: `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
             <div style="margin-bottom:20px;">
-              <span style="font-size:26px;font-weight:800;color:#134e4a;letter-spacing:-0.5px;">aangan<span style="color:#d97706;">.</span></span>
+              <span style="font-size:26px;font-weight:800;color:#134e4a;letter-spacing:-0.5px;">apnaangaan<span style="color:#d97706;">.</span></span>
             </div>
             <h2 style="font-size:18px;font-weight:700;color:#0f172a;margin:0 0 12px;">Your verification code</h2>
             <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 20px;">
-              Enter this 6-digit code to verify your email and sign in to your Aangan account:
+              Enter this 6-digit code to verify your email and sign in to your Apnaangaan account:
             </p>
             <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:16px 20px;text-align:center;margin-bottom:20px;">
               <span style="font-family:monospace;font-size:32px;font-weight:800;letter-spacing:8px;color:#166534;">${code}</span>
@@ -222,6 +437,146 @@ async function getAdminLead(lead: Lead, property: Property, customer: User, owne
   return serializeAdminLead(lead, property, customer, owner, meeting, history, logs);
 }
 
+async function assertNotAdminIdentifier(identifier: string, isEmail: boolean) {
+  const clean = identifier.toLowerCase().trim();
+  const [matched] = await db
+    .select({ role: users.role, roles: users.roles })
+    .from(users)
+    .where(isEmail ? sql`lower(${users.email}) = ${clean}` : eq(users.phone, clean))
+    .limit(1);
+  if (matched && (matched.role === "admin" || matched.roles?.includes("admin"))) {
+    fail(403, "Administrator accounts must sign in through the team portal.");
+  }
+}
+
+async function handleUserProfileUpdate(request: NextRequest, isExplicitOnboarding = false): Promise<NextResponse> {
+  const user = await requireUser(request);
+
+  const input = await body(request, z.object({
+    email: z.string().trim().email().optional(),
+    name: cleanText(150).optional(),
+    city: cleanText(120).optional(),
+    location: cleanText(255).optional(),
+    phone: cleanText(25).optional(),
+    role: z.string().optional(),
+    addOwnerRole: z.boolean().optional(),
+    consent: z.boolean().optional(),
+  }));
+
+  // Name validation if provided or during explicit onboarding (supports Hindi/Devanagari & rejects whitespace-only)
+  if ((isExplicitOnboarding || input.name !== undefined) && (!input.name || input.name.length < 2)) {
+    fail(422, "Please enter your full name (at least 2 characters).");
+  }
+
+  // Location validation
+  if (input.location !== undefined && input.location.length < 2) {
+    fail(422, "City / Location cannot be empty (at least 2 characters).");
+  }
+  if (input.city !== undefined && input.city.length < 2) {
+    fail(422, "City cannot be empty (at least 2 characters).");
+  }
+  const targetLocation = (input.location || input.city) || undefined;
+  if (isExplicitOnboarding && (!targetLocation || targetLocation.length < 2)) {
+    fail(422, "City / Location is required and cannot be empty.");
+  }
+
+  // Phone validation (+91 / 10-digit Indian mobile number)
+  let cleanPhone: string | undefined = undefined;
+  if (input.phone) {
+    const parsedPhone = parseIndianPhone(input.phone);
+    if (!parsedPhone.valid) {
+      fail(422, parsedPhone.error);
+    }
+    cleanPhone = parsedPhone.e164;
+    const core = parsedPhone.digits;
+
+    const [existingPhone] = await db
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(and(or(eq(users.phone, cleanPhone), eq(users.phone, core)), sql`${users.id} != ${user.id}`))
+      .limit(1);
+
+    if (existingPhone) {
+      if (!existingPhone.name && existingPhone.email?.includes("@apnaangaan.in")) {
+        await db.update(users).set({ phone: null }).where(eq(users.id, existingPhone.id));
+      } else {
+        fail(409, "This phone number is already registered with another account.");
+      }
+    }
+  } else if (isExplicitOnboarding && !user.phone) {
+    fail(422, "Phone number is required during onboarding.");
+  }
+
+  // Role mapping: "Home Seeker", "Home Owner", "Owner/Rent", "customer", "owner"
+  const rawRole = (input.role || "").toLowerCase().trim();
+  if (rawRole === "admin") {
+    fail(403, "Administrator roles cannot be self-assigned.");
+  }
+  const isOwner =
+    rawRole === "owner" ||
+    rawRole.includes("owner") ||
+    rawRole.includes("rent") ||
+    Boolean(input.addOwnerRole);
+
+  let roles: Array<"customer" | "owner" | "admin"> = user.roles || ["customer"];
+  if (isOwner) {
+    if (!roles.includes("owner")) roles = [...roles, "owner"];
+  } else if (rawRole.includes("seeker") || rawRole === "customer") {
+    if (!hasRole(user, "admin")) roles = ["customer"];
+  }
+
+  const finalRole = hasRole(user, "admin")
+    ? "admin"
+    : roles.includes("owner")
+    ? "owner"
+    : "customer";
+
+  // Email update if provided and different
+  let cleanEmail: string | undefined = undefined;
+  if (input.email) {
+    const normalized = input.email.trim().toLowerCase();
+    if (normalized !== user.email?.toLowerCase()) {
+      const [existingEmail] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(sql`lower(${users.email}) = ${normalized}`, sql`${users.id} != ${user.id}`))
+        .limit(1);
+      if (existingEmail) {
+        fail(409, "This email is already registered with another account.");
+      }
+      cleanEmail = normalized;
+    }
+  }
+
+  try {
+    const [updated] = await db
+      .update(users)
+      .set({
+        ...(input.name ? { name: input.name.trim() } : {}),
+        ...(targetLocation ? { location: targetLocation, city: targetLocation } : {}),
+        ...(cleanPhone ? { phone: cleanPhone } : {}),
+        ...(cleanEmail ? { email: cleanEmail } : {}),
+        role: finalRole,
+        roles,
+        ...(input.consent !== false ? { consentAt: user.consentAt || new Date() } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id))
+      .returning();
+
+    return attachSession(
+      respond({ user: publicSelf(updated), message: "Profile saved successfully." }),
+      updated
+    );
+  } catch (err: any) {
+    console.error("[Profile Update Error]:", err);
+    if (err && typeof err === "object" && err.code === "23505") {
+      fail(409, "A user with this email or phone number already exists.");
+    }
+    fail(500, "Could not save profile details. Please try again.");
+  }
+}
+
 async function handle(request: NextRequest, method: string, segments: string[]): Promise<NextResponse> {
   const route = segments.join("/");
   const params = request.nextUrl.searchParams;
@@ -235,6 +590,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     const identifier = (input.email || input.phone!).toLowerCase().trim();
     const isEmail = identifier.includes("@");
+    await assertNotAdminIdentifier(identifier, isEmail);
     const now = new Date();
     const [previous] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
 
@@ -254,11 +610,11 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (isEmail && hasResend) {
       const result = await sendResendOtp(identifier, code);
       if (!result.success) {
-        console.error(`[Aangan Auth] Failed to dispatch OTP to ${identifier}:`, result.error);
+        console.error(`[Apnaangaan Auth] Failed to dispatch OTP to ${identifier}:`, result.error);
         fail(502, `Could not send verification email: ${result.error || "Please verify your Resend domain/API key."}`);
       }
     } else {
-      console.log(`[Aangan Auth] OTP for ${identifier}: ${code}`);
+      console.log(`[Apnaangaan Auth] OTP for ${identifier}: ${code}`);
     }
 
     await db.insert(otpChallenges).values({
@@ -289,6 +645,45 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     });
   }
 
+  if (route === "auth/login" && method === "POST") {
+    const input = await body(request, z.object({
+      email: z.string().trim().email("Enter a valid email address.").max(255),
+    }));
+
+    const identifier = input.email.toLowerCase().trim();
+    const now = new Date();
+
+    try {
+      let [user] = await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.email}) = ${identifier}`)
+        .limit(1);
+
+      if (!user) {
+        fail(404, "No account found with this email. Please sign up to create your account.");
+      }
+      if (user.role === "admin" || user.roles.includes("admin")) {
+        fail(403, "Administrator accounts must sign in through the team portal.");
+      }
+
+      const [updated] = await db
+        .update(users)
+        .set({
+          lastLogin: now,
+          updatedAt: now,
+        })
+        .where(eq(users.id, user.id))
+        .returning();
+
+      return attachSession(respond({ user: publicSelf(updated), message: "Welcome back to Apnaangaan." }), updated);
+    } catch (err: any) {
+      if (err?.status) throw err;
+      console.error("[Login Error]:", err);
+      fail(500, "Could not complete login. Please try again.");
+    }
+  }
+
   if (route === "auth/otp/verify" && method === "POST") {
     const input = await body(request, z.object({
       email: z.string().trim().email().max(255).optional(),
@@ -298,6 +693,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     const identifier = (input.email || input.phone!).toLowerCase().trim();
     const isEmail = identifier.includes("@");
+    await assertNotAdminIdentifier(identifier, isEmail);
 
     const [challenge] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
     if (!challenge || challenge.expiresAt < new Date() || challenge.attempts >= 5) {
@@ -315,24 +711,46 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     await db.update(otpChallenges).set({ codeHash: "used", expiresAt: new Date(), attempts: 5 }).where(eq(otpChallenges.phone, identifier));
 
-    let [user] = isEmail
-      ? await db.select().from(users).where(eq(users.email, identifier)).limit(1)
-      : await db.select().from(users).where(eq(users.phone, identifier)).limit(1);
+    const now = new Date();
+    try {
+      let [user] = isEmail
+        ? await db.select().from(users).where(sql`lower(${users.email}) = ${identifier}`).limit(1)
+        : await db.select().from(users).where(eq(users.phone, identifier)).limit(1);
 
-    if (!user) {
-      const [created] = await db.insert(users).values({
-        email: isEmail ? identifier : null,
-        phone: !isEmail ? identifier : null,
-        role: "customer",
-        roles: ["customer"],
-        otpVerifiedAt: new Date(),
-      }).returning();
-      user = created;
-    } else {
-      await db.update(users).set({ otpVerifiedAt: new Date() }).where(eq(users.id, user.id));
+      if (!user) {
+        const fallbackEmail = isEmail ? identifier : `user_${identifier.replace(/\D/g, "")}@apnaangaan.in`;
+        const [created] = await db.insert(users).values({
+          email: fallbackEmail,
+          phone: !isEmail ? identifier : null,
+          role: "customer",
+          roles: ["customer"],
+          lastLogin: now,
+          otpVerifiedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }).onConflictDoUpdate({
+          target: users.email,
+          set: {
+            lastLogin: now,
+            otpVerifiedAt: now,
+            updatedAt: now,
+          },
+        }).returning();
+        user = created;
+      } else {
+        const [updated] = await db.update(users).set({
+          lastLogin: now,
+          otpVerifiedAt: now,
+          updatedAt: now,
+        }).where(eq(users.id, user.id)).returning();
+        user = updated;
+      }
+
+      return attachSession(respond({ user: publicSelf(user), message: "Welcome to Apnaangaan." }), user);
+    } catch (err: any) {
+      console.error("[OTP Verify Error]:", err);
+      fail(500, "Could not verify code and complete login. Please try again.");
     }
-
-    return attachSession(respond({ user: publicSelf(user), message: "Welcome to Aangan." }), user);
   }
   if (route === "auth/me" && method === "GET") {
     const user = await getAuthUser(request);
@@ -362,7 +780,26 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
   if (route === "locations" && method === "GET") {
     const q = (params.get("q") || "").toLowerCase().trim();
-    const fallbackCities = ["Bengaluru", "Mumbai", "Delhi", "Gurugram", "Hyderabad", "Pune", "Jaipur", "Noida", "Chennai", "Kolkata", "Ahmedabad", "Chandigarh"];
+    const fallbackCities = ["Bengaluru", "Mumbai", "Delhi NCR", "Gurugram", "Hyderabad", "Pune", "Jaipur", "Noida", "Chennai", "Kolkata", "Ahmedabad", "Chandigarh"];
+
+    const googleKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (googleKey && q.length >= 2) {
+      try {
+        const gRes = await fetch(
+          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&components=country:in&key=${encodeURIComponent(googleKey)}`
+        );
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (Array.isArray(gData.predictions) && gData.predictions.length > 0) {
+            const places = gData.predictions.map((p: any) => p.description.replace(/, India$/, ""));
+            return respond({ suggestions: places.slice(0, 8), source: "google" });
+          }
+        }
+      } catch (err) {
+        console.warn("Google Places API lookup error:", err);
+      }
+    }
+
     try {
       const rows = await db
         .selectDistinct({ locality: properties.locality, city: properties.city })
@@ -373,11 +810,10 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         if (row.locality && row.city) combined.add(`${row.locality}, ${row.city}`);
         if (row.city) combined.add(row.city);
       }
-      const filtered = Array.from(combined).filter((item) => item.toLowerCase().includes(q)).slice(0, 8);
-      return respond({ suggestions: filtered.length > 0 ? filtered : fallbackCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8) });
+      return respond({ suggestions: filterLocationSuggestions(q, Array.from(combined), fallbackCities, 8) });
     } catch (err) {
       console.warn("Locations lookup fallback due to DB connection:", err);
-      return respond({ suggestions: fallbackCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8) });
+      return respond({ suggestions: filterLocationSuggestions(q, [], fallbackCities, 8) });
     }
   }
 
@@ -385,9 +821,40 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const lat = params.get("lat");
     const lon = params.get("lon") || params.get("lng");
     if (!lat || !lon) fail(400, "Latitude and longitude are required.");
+
+    const googleKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (googleKey) {
+      try {
+        const gRes = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${encodeURIComponent(lat)},${encodeURIComponent(lon)}&key=${encodeURIComponent(googleKey)}`
+        );
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (Array.isArray(gData.results) && gData.results.length > 0) {
+            const first = gData.results[0];
+            let sublocality = "";
+            let locality = "";
+            let city = "";
+            for (const comp of first.address_components || []) {
+              if (comp.types.includes("sublocality") || comp.types.includes("neighborhood")) sublocality = comp.long_name;
+              if (comp.types.includes("locality")) locality = comp.long_name;
+              if (!city && comp.types.includes("administrative_area_level_2")) city = comp.long_name;
+            }
+            const label = [sublocality, locality || city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ") ||
+              first.formatted_address?.split(",").slice(0, 2).join(", ").trim();
+            if (label) {
+              return respond({ location: label, city: locality || city || label, address: first.formatted_address, source: "google" });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Google Maps reverse geocode error:", err);
+      }
+    }
+
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=14&addressdetails=1`, {
-        headers: { "User-Agent": "AanganApp/1.0 (contact@apnaangan.in)" },
+        headers: { "User-Agent": "ApnaangaanApp/1.0 (contact@apnaangaan.in)" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -415,30 +882,130 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
   // Public property responses always pass through the explicit PII-free serializer.
   if (route === "properties" && method === "GET") {
-    return respond(await findProperties({ category: params.get("category") || undefined, city: params.get("city") || undefined, q: params.get("q") || undefined, minPrice: safeNumber(params.get("minPrice")), maxPrice: safeNumber(params.get("maxPrice")), minArea: safeNumber(params.get("minArea")), maxArea: safeNumber(params.get("maxArea")), bhk: params.get("bhk") || undefined, furnishing: params.get("furnishing") || undefined, verified: params.get("verified") === "true", sort: params.get("sort") || undefined, page: pageFrom(request), limit: safeNumber(params.get("limit")) }));
+    const rawCategory = params.get("category");
+    const rawTx = params.get("transactionType") || params.get("type");
+    const rawPropType = params.get("propertyType");
+
+    if (rawCategory) {
+      const catLower = rawCategory.toLowerCase().trim();
+      if (["buy", "buy_home", "sale", "purchase", "pg", "rent_pg", "paying_guest", "paying guest", "coliving", "co-living", "commercial", "rent_commercial", "office", "retail", "shop"].includes(catLower)) {
+        fail(422, "Only residential home rentals are supported. Buy, PG, and Commercial queries are rejected.");
+      }
+      if (!["rent_home", "rent", "home", "residential"].includes(catLower)) {
+        fail(422, "Invalid category. Only residential home rentals (rent_home) are supported.");
+      }
+    }
+
+    if (rawTx) {
+      const txLower = rawTx.toLowerCase().trim();
+      if (["buy", "sale", "purchase"].includes(txLower)) {
+        fail(422, "Only rental transactions are supported. Buy queries are rejected.");
+      }
+      if (!["rent", "rental"].includes(txLower)) {
+        fail(422, "Invalid transaction type. Only Rent is supported.");
+      }
+    }
+
+    if (rawPropType) {
+      const ptLower = rawPropType.toLowerCase().trim();
+      if (/\b(shop|office|retail|commercial|pg|paying guest|hostel|warehouse|showroom|industrial|plot|land)\b/i.test(ptLower)) {
+        fail(422, "Only residential home rentals are supported. Commercial and PG property types are rejected.");
+      }
+    }
+
+    return respond(await findProperties({ category: "rent_home", city: params.get("city") || undefined, q: params.get("q") || undefined, propertyType: params.get("propertyType") || undefined, minPrice: safeNumber(params.get("minPrice")), maxPrice: safeNumber(params.get("maxPrice")), minArea: safeNumber(params.get("minArea")), maxArea: safeNumber(params.get("maxArea")), bhk: params.get("bhk") || undefined, furnishing: params.get("furnishing") || undefined, verified: params.get("verified") === "true", sort: params.get("sort") || undefined, page: pageFrom(request), limit: safeNumber(params.get("limit")) }));
   }
   if (segments[0] === "properties" && segments.length === 2 && method === "GET") {
     const property = await getProperty(validId(segments[1]));
-    if (!property) fail(404, "Property not found.");
+    if (!property || property.category !== "rent_home") fail(404, "Property not found.");
     await db.update(properties).set({ views: sql`${properties.views} + 1` }).where(eq(properties.id, property.id));
     return respond({ property: serializePublicProperty(property) });
   }
   if (route === "properties" && method === "POST") {
-    const user = await requireUser(request);
+    const user = await requireRole(request, "owner");
     if (!user.phone || !user.name || !user.consentAt) {
       fail(403, "Please complete your profile and verify your phone number before posting a property.");
     }
-    if (!user.roles.includes("owner")) {
-      const updatedRoles: Array<"customer" | "owner" | "admin"> = [...user.roles, "owner"];
-      await db.update(users).set({ roles: updatedRoles, role: user.role !== "admin" ? "owner" : user.role, updatedAt: new Date() }).where(eq(users.id, user.id));
-      user.roles = updatedRoles;
+    let rawJson: unknown;
+    try { rawJson = await request.clone().json(); } catch { throw new HttpError(400, "Please provide valid JSON."); }
+    const isDraftSave = Boolean(rawJson && typeof rawJson === "object" && (rawJson as Record<string, unknown>).status === "draft");
+
+    if (isDraftSave) {
+      const draftInput = await body(request, propertyDraftInput);
+      rejectContactDetails(draftInput);
+      const normalizedPropertyType = draftInput.propertyType
+        ? (normalizeFromAllowlist(draftInput.propertyType, PROPERTY_TYPES_BY_VERTICAL.rent_home) || "Apartment")
+        : "Apartment";
+      const normalizedBhk = draftInput.bhkOrRoomType
+        ? (normalizeFromAllowlist(draftInput.bhkOrRoomType, BHK_OPTIONS_BY_VERTICAL.rent_home) || "2 BHK")
+        : "2 BHK";
+      const draftCity = draftInput.city?.trim() || user.city || "Bengaluru";
+      const draftLocality = draftInput.locality?.trim() || "Draft location";
+      const draftAddress = draftInput.address?.trim() || "Draft address pending";
+      const draftArea = draftInput.areaSqft ?? 1000;
+      const draftPrice = draftInput.price ?? 10000;
+      const title = draftInput.title?.trim() || `${normalizedBhk} ${normalizedPropertyType} in ${draftLocality || draftCity}`;
+      const description = draftInput.description?.trim() || `${normalizedBhk} ${normalizedPropertyType} (${draftArea} sq ft) in ${draftLocality || draftCity}.`;
+
+      const [property] = await db.insert(properties).values({
+        ...draftInput,
+        category: "rent_home",
+        propertyType: normalizedPropertyType,
+        bhkOrRoomType: normalizedBhk,
+        address: draftAddress,
+        city: draftCity,
+        locality: draftLocality,
+        areaSqft: draftArea,
+        price: draftPrice,
+        bathrooms: draftInput.bathrooms ?? 1,
+        title,
+        description,
+        ownerId: user.id,
+        availabilityDate: draftInput.availabilityDate ? new Date(draftInput.availabilityDate) : null,
+        possessionDate: draftInput.possessionDate ? new Date(draftInput.possessionDate) : null,
+        latitude: draftInput.latitude ?? null,
+        longitude: draftInput.longitude ?? null,
+        reraNumber: draftInput.reraNumber || null,
+        deposit: draftInput.deposit ?? null,
+        ownerName: draftInput.ownerName || user.name,
+        ownerPhone: draftInput.ownerPhone || user.phone,
+        liveSelfieUrl: draftInput.liveSelfieUrl || null,
+        aadhaarCardUrl: draftInput.aadhaarCardUrl || null,
+        ownershipType: draftInput.ownershipType || "sole_owner",
+        coOwners: draftInput.coOwners || null,
+        pinCode: draftInput.pinCode || null,
+        landmark: draftInput.landmark || null,
+        floor: draftInput.floor || null,
+        totalFloors: draftInput.totalFloors ?? null,
+        propertyAge: draftInput.propertyAge || null,
+        facing: draftInput.facing || null,
+        maintenanceStatus: draftInput.maintenanceStatus || null,
+        maintenanceAmount: draftInput.maintenanceAmount ?? null,
+        possessionStatus: draftInput.possessionStatus || null,
+        loanStatus: draftInput.loanStatus || null,
+        lockInPeriod: draftInput.lockInPeriod || null,
+        noticePeriod: draftInput.noticePeriod || null,
+        tenantPreference: draftInput.tenantPreference || null,
+        bedCount: draftInput.bedCount || null,
+        genderPolicy: draftInput.genderPolicy || null,
+        houseRules: draftInput.houseRules || [],
+        itemizedCharges: draftInput.itemizedCharges || {},
+        status: "draft",
+        verified: false,
+      }).returning(ownerPropertyColumns);
+      return respond({ property: serializePublicProperty(property), status: property.status, message: "Draft saved to your owner dashboard." }, 201);
     }
+
     const input = await body(request, propertyInput);
     rejectContactDetails(input);
-    const title = input.title?.trim() || `${input.bhkOrRoomType} ${input.propertyType} in ${input.locality || input.landmark || input.city}`;
-    const description = input.description?.trim() || `${input.bhkOrRoomType} ${input.propertyType} (${input.areaSqft} sq ft) located in ${input.locality || input.city}. Furnishing: ${input.furnishingStatus || "Unfurnished"}.`;
+    const normalizedPropertyType = normalizeFromAllowlist(input.propertyType, PROPERTY_TYPES_BY_VERTICAL.rent_home) || input.propertyType;
+    const normalizedBhk = normalizeFromAllowlist(input.bhkOrRoomType, BHK_OPTIONS_BY_VERTICAL.rent_home) || input.bhkOrRoomType;
+    const title = input.title?.trim() || `${normalizedBhk} ${normalizedPropertyType} in ${input.locality || input.landmark || input.city}`;
+    const description = input.description?.trim() || `${normalizedBhk} ${normalizedPropertyType} (${input.areaSqft} sq ft) located in ${input.locality || input.city}. Furnishing: ${input.furnishingStatus || "Unfurnished"}.`;
     const [property] = await db.insert(properties).values({
       ...input,
+      propertyType: normalizedPropertyType,
+      bhkOrRoomType: normalizedBhk,
       title,
       description,
       ownerId: user.id,
@@ -473,7 +1040,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       itemizedCharges: input.itemizedCharges || {},
       status: "pending_review",
       verified: false,
-    }).returning();
+    }).returning(ownerPropertyColumns);
     if (input.liveSelfieUrl || input.aadhaarCardUrl) {
       await db.update(users).set({
         liveSelfieUrl: input.liveSelfieUrl || undefined,
@@ -485,49 +1052,115 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   }
   if (segments[0] === "properties" && segments.length === 2 && ["PATCH", "DELETE"].includes(method)) {
     const user = await requireRole(request, "owner");
-    const [existing] = await db.select().from(properties).where(eq(properties.id, validId(segments[1]))).limit(1);
-    if (!existing || (existing.ownerId !== user.id && !hasRole(user, "admin"))) fail(404, "Listing not found.");
+    const [existing] = await db
+      .select()
+      .from(properties)
+      .where(eq(properties.id, validId(segments[1])))
+      .limit(1);
+    if (!existing || existing.category !== "rent_home") fail(404, "Listing not found.");
+    if (existing.ownerId !== user.id && !hasRole(user, "admin")) fail(403, "You do not have permission to modify this listing.");
     if (method === "DELETE") {
       await db.delete(properties).where(eq(properties.id, existing.id));
       return respond({ message: "Listing permanently deleted." });
     }
     const input = await body(request, propertyPatchSchema);
     rejectContactDetails(input);
-    if (input.status) {
-      if (input.status === "live" && !existing.verified) fail(422, "Only verified listings can be made live.");
-      if (input.status === "pending_review") {
+    const { status: requestedStatus, availabilityDate, possessionDate, itemizedCharges, ...rawChanges } = input;
+    const changes = Object.fromEntries(Object.entries(rawChanges).filter(([, value]) => value !== undefined)) as Record<string, unknown>;
+    if (typeof changes.propertyType === "string") {
+      const normType = normalizeFromAllowlist(changes.propertyType, PROPERTY_TYPES_BY_VERTICAL.rent_home);
+      if (normType) changes.propertyType = normType;
+    }
+    if (typeof changes.bhkOrRoomType === "string") {
+      const normBhk = normalizeFromAllowlist(changes.bhkOrRoomType, BHK_OPTIONS_BY_VERTICAL.rent_home);
+      if (normBhk) changes.bhkOrRoomType = normBhk;
+    }
+    const hasContentChanges =
+      Object.keys(changes).length > 0 ||
+      availabilityDate !== undefined ||
+      possessionDate !== undefined ||
+      itemizedCharges !== undefined;
+
+    if (requestedStatus === "draft" && existing.status !== "draft") {
+      fail(422, "Submitted or live listings cannot be reverted to draft. Pause the listing instead.");
+    }
+
+    const stayingInDraft = existing.status === "draft" && requestedStatus !== "pending_review";
+    if (hasContentChanges || (existing.status === "draft" && requestedStatus === "pending_review")) {
+      const merged = {
+        category: existing.category,
+        propertyType: (changes.propertyType as string | undefined) ?? existing.propertyType,
+        bhkOrRoomType: (changes.bhkOrRoomType as string | undefined) ?? existing.bhkOrRoomType,
+        price: changes.price !== undefined ? changes.price : existing.price,
+        areaSqft: changes.areaSqft !== undefined ? changes.areaSqft : existing.areaSqft,
+        deposit: changes.deposit !== undefined ? changes.deposit : existing.deposit,
+        bathrooms: changes.bathrooms !== undefined ? changes.bathrooms : existing.bathrooms,
+        floor: changes.floor !== undefined ? (changes.floor as string | null) : existing.floor,
+        totalFloors: changes.totalFloors !== undefined ? changes.totalFloors : existing.totalFloors,
+        maintenanceStatus: changes.maintenanceStatus !== undefined ? (changes.maintenanceStatus as string | null) : existing.maintenanceStatus,
+        maintenanceAmount: changes.maintenanceAmount !== undefined ? changes.maintenanceAmount : existing.maintenanceAmount,
+        pinCode: changes.pinCode !== undefined ? (changes.pinCode as string | null) : existing.pinCode,
+        images: (changes.images as string[] | undefined) ?? existing.images,
+      };
+      const verticalErr = validateVerticalRules(merged, { isDraft: stayingInDraft });
+      if (verticalErr) fail(422, verticalErr);
+      if (!stayingInDraft && (!merged.images || merged.images.length < 1)) {
+        fail(422, "Please attach at least 1 property photo before submitting for review.");
+      }
+
+      const nextStatus = stayingInDraft ? "draft" : "pending_review";
+      const [updated] = await db.update(properties).set({
+        ...changes,
+        ...(availabilityDate !== undefined ? { availabilityDate: availabilityDate ? new Date(availabilityDate) : null } : {}),
+        ...(possessionDate !== undefined ? { possessionDate: possessionDate ? new Date(possessionDate) : null } : {}),
+        ...(itemizedCharges !== undefined ? { itemizedCharges: itemizedCharges ?? {} } : {}),
+        status: nextStatus,
+        verified: false,
+        rejectionReason: null,
+        updatedAt: new Date(),
+      }).where(eq(properties.id, existing.id)).returning(ownerPropertyColumns);
+      if (!stayingInDraft) {
+        await sendNotification(user.id, "listing", `Changes to "${updated.title}" were submitted for admin review before going live.`, "/owner");
+      }
+      return respond({
+        property: serializePublicProperty(updated),
+        status: updated.status,
+        message: stayingInDraft ? "Draft updated." : "Changes submitted for re-verification.",
+      });
+    }
+
+    if (requestedStatus) {
+      if (requestedStatus === "live") {
+        if (!existing.verified || (existing.status !== "paused" && existing.status !== "rented")) {
+          fail(422, "Only admin-approved listings can be made live.");
+        }
+      }
+      if (requestedStatus === "pending_review") {
         const [updated] = await db.update(properties).set({
           status: "pending_review",
           verified: false,
           rejectionReason: null,
           updatedAt: new Date(),
-        }).where(eq(properties.id, existing.id)).returning();
+        }).where(eq(properties.id, existing.id)).returning(ownerPropertyColumns);
         await sendNotification(user.id, "listing", `Your listing "${updated.title}" was resubmitted for verification.`, "/owner");
         return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Listing resubmitted for verification." });
       }
-      const [updated] = await db.update(properties).set({ status: input.status, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning();
-      const statusLabel = input.status === "live" ? "is now live" : input.status === "paused" ? "is now paused" : `has been marked as ${input.status}`;
+      const [updated] = await db.update(properties).set({ status: requestedStatus, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning(ownerPropertyColumns);
+      const statusLabel = requestedStatus === "live" ? "is now live" : requestedStatus === "paused" ? "is now paused" : `has been marked as ${requestedStatus}`;
       await sendNotification(user.id, "listing", `Your listing "${updated.title}" ${statusLabel}.`, "/owner");
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
-    const { status: _ignoredStatus, availabilityDate, possessionDate, itemizedCharges, ...changes } = input;
-    const [updated] = await db.update(properties).set({
-      ...changes,
-      ...(availabilityDate !== undefined ? { availabilityDate: availabilityDate ? new Date(availabilityDate) : null } : {}),
-      ...(possessionDate !== undefined ? { possessionDate: possessionDate ? new Date(possessionDate) : null } : {}),
-      ...(itemizedCharges !== undefined ? { itemizedCharges: itemizedCharges ?? {} } : {}),
-      status: "pending_review",
-      verified: false,
-      rejectionReason: null,
-      updatedAt: new Date(),
-    }).where(eq(properties.id, existing.id)).returning();
-    return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Changes submitted for re-verification." });
+
+    fail(422, "Provide listing changes or a status update.");
+  }
+  if (route.startsWith("owner/")) {
+    await requireRole(request, "owner");
   }
   if (route === "owner/properties" && method === "GET") {
     const user = await requireRole(request, "owner");
     const page = pageFrom(request);
     const [items, [{ total }], counts] = await Promise.all([
-      db.select().from(properties).where(eq(properties.ownerId, user.id)).orderBy(desc(properties.createdAt)).limit(12).offset((page - 1) * 12),
+      db.select(ownerPropertyColumns).from(properties).where(eq(properties.ownerId, user.id)).orderBy(desc(properties.createdAt)).limit(24).offset((page - 1) * 24),
       db.select({ total: count() }).from(properties).where(eq(properties.ownerId, user.id)),
       db.select({ propertyId: leads.propertyId, total: count() }).from(leads).where(eq(leads.ownerId, user.id)).groupBy(leads.propertyId),
     ]);
@@ -539,24 +1172,109 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         views: item.views,
         inquiryCount: countMap.get(item.id) || 0,
         rejectionReason: item.rejectionReason,
-        liveSelfieUrl: item.liveSelfieUrl,
-        aadhaarCardUrl: item.aadhaarCardUrl,
-        ownershipType: item.ownershipType,
-        coOwners: item.coOwners,
       })),
       total,
       page,
-      pages: Math.ceil(total / 12),
+      pages: Math.ceil(total / 24),
     });
+  }
+  if (segments[0] === "owner" && segments[1] === "properties" && segments.length === 3 && method === "GET") {
+    const user = await requireRole(request, "owner");
+    const id = validId(segments[2]);
+    const [row] = await db
+      .select({
+        id: properties.id,
+        ownerId: properties.ownerId,
+        category: properties.category,
+        propertyType: properties.propertyType,
+        title: properties.title,
+        description: properties.description,
+        price: properties.price,
+        priceType: properties.priceType,
+        address: properties.address,
+        city: properties.city,
+        locality: properties.locality,
+        pinCode: properties.pinCode,
+        landmark: properties.landmark,
+        latitude: properties.latitude,
+        longitude: properties.longitude,
+        bhkOrRoomType: properties.bhkOrRoomType,
+        areaSqft: properties.areaSqft,
+        bathrooms: properties.bathrooms,
+        floor: properties.floor,
+        totalFloors: properties.totalFloors,
+        propertyAge: properties.propertyAge,
+        facing: properties.facing,
+        furnishingStatus: properties.furnishingStatus,
+        amenities: properties.amenities,
+        images: properties.images,
+        availabilityDate: properties.availabilityDate,
+        reraNumber: properties.reraNumber,
+        deposit: properties.deposit,
+        ownerName: properties.ownerName,
+        ownerPhone: properties.ownerPhone,
+        liveSelfieUrl: properties.liveSelfieUrl,
+        aadhaarCardUrl: properties.aadhaarCardUrl,
+        ownershipType: properties.ownershipType,
+        coOwners: properties.coOwners,
+        maintenanceStatus: properties.maintenanceStatus,
+        maintenanceAmount: properties.maintenanceAmount,
+        lockInPeriod: properties.lockInPeriod,
+        noticePeriod: properties.noticePeriod,
+        tenantPreference: properties.tenantPreference,
+        houseRules: properties.houseRules,
+        status: properties.status,
+        verified: properties.verified,
+        rejectionReason: properties.rejectionReason,
+      })
+      .from(properties)
+      .where(eq(properties.id, id))
+      .limit(1);
+    if (!row) fail(404, "Listing not found.");
+    if (row.ownerId !== user.id && !hasRole(user, "admin")) {
+      fail(403, "You do not have permission to view this listing.");
+    }
+    return respond({ property: row });
   }
 
   // Lead creation never returns owner contact information; owner notifications are anonymous.
-  if (route === "leads" && method === "POST") {
+  const isPropertyInquiryRoute = segments[0] === "properties" && segments.length === 3 && segments[2] === "inquiries";
+  if ((route === "leads" || isPropertyInquiryRoute) && method === "POST") {
     const user = await requireUser(request);
     if (!hasRole(user, "customer") && !hasRole(user, "owner")) fail(403, "Only property seekers can express interest.");
     if (!user.consentAt || !user.phone) fail(403, "Please complete your profile and provide a contact phone number before sending an inquiry.");
+    const input = await body(
+      request,
+      z.object({
+        propertyId: uuid.optional(),
+        preferredContactTime: cleanText(100).optional(),
+        occupantsCount: cleanText(50).optional(),
+        tenantType: cleanText(100).optional(),
+        profession: cleanText(100).optional(),
+        groupGender: cleanText(50).optional(),
+        moveInTimeline: cleanText(100).optional(),
+        confirmedPhone: cleanText(25).optional(),
+        seekerNotes: cleanText(1000).optional().transform((v) => (v ? v : undefined)),
+        message: cleanText(1000).optional().transform((v) => (v ? v : undefined)),
+      })
+    );
+    rejectContactDetails(input, ["seekerNotes", "message"]);
+    const targetPropertyId = isPropertyInquiryRoute ? validId(segments[1]) : input.propertyId;
+    if (!targetPropertyId) fail(400, "Property ID is required.");
+    const property = await getPropertyForLeadCreation(targetPropertyId);
+    if (!property) {
+      const unavailableStatus = await getUnavailablePropertyStatus(targetPropertyId);
+      if (unavailableStatus === "paused") {
+        fail(422, "This listing is paused by the owner and is not accepting inquiries right now.");
+      }
+      if (unavailableStatus === "rented" || unavailableStatus === "sold") {
+        fail(422, "This listing is no longer available and is not accepting inquiries.");
+      }
+      fail(404, "Property not found.");
+    }
+    if (property.ownerId === user.id) fail(422, "You cannot inquire about your own listing.");
+    const propertyId = targetPropertyId;
     const {
-      propertyId,
       preferredContactTime,
       occupantsCount,
       tenantType,
@@ -565,33 +1283,36 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       moveInTimeline,
       confirmedPhone,
       seekerNotes,
-    } = await body(
-      request,
-      z.object({
-        propertyId: uuid,
-        preferredContactTime: z.string().trim().max(100).optional(),
-        occupantsCount: z.string().trim().max(50).optional(),
-        tenantType: z.string().trim().max(100).optional(),
-        profession: z.string().trim().max(100).optional(),
-        groupGender: z.string().trim().max(50).optional(),
-        moveInTimeline: z.string().trim().max(100).optional(),
-        confirmedPhone: z.string().trim().max(20).optional(),
-        seekerNotes: z.string().trim().max(1000).optional(),
-      })
-    );
-    const property = await getProperty(propertyId);
-    if (!property) fail(404, "Property not found.");
-    if (property.ownerId === user.id) fail(422, "You cannot inquire about your own listing.");
+      message,
+    } = input;
 
-    let cleanPhone = confirmedPhone?.replace(/\D/g, "") || "";
-    if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
-    const validPhone = /^[6-9]\d{9}$/.test(cleanPhone) ? `+91${cleanPhone}` : (user.phone || null);
+    let validPhone: string | null = user.phone || null;
+    if (confirmedPhone) {
+      const parsedPhone = parseIndianPhone(confirmedPhone);
+      if (!parsedPhone.valid) {
+        fail(422, parsedPhone.error);
+      }
+      validPhone = parsedPhone.e164;
+    }
     if (validPhone && !user.phone) {
       await db.update(users).set({ phone: validPhone }).where(eq(users.id, user.id));
     }
 
-    const [previous] = await db.select().from(leads).where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId))).limit(1);
+    const [previous] = await db
+      .select({ ...customerLeadColumns, confirmedPhone: leads.confirmedPhone })
+      .from(leads)
+      .where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId)))
+      .limit(1);
     if (previous) {
+      const isWithin24h = (Date.now() - new Date(previous.createdAt).getTime()) < 24 * 60 * 60 * 1000;
+      if (isWithin24h) {
+        // Idempotency: Duplicate interest within 24h must NOT send a second WhatsApp message or duplicate notifications
+        return respond({
+          duplicate: true,
+          lead: serializeCustomerLead(previous, property, await latestMeeting(previous.id)),
+          message: "You have already expressed interest in this property within the last 24 hours. Our team is coordinating with the owner.",
+        });
+      }
       const [updated] = await db
         .update(leads)
         .set({
@@ -599,17 +1320,18 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           occupantsCount: occupantsCount || previous.occupantsCount,
           tenantType: tenantType || previous.tenantType,
           profession: profession || previous.profession,
-          groupGender: groupGender || previous.groupGender,
+          groupGender: groupGender || previous.groupGender || "N/A",
           moveInTimeline: moveInTimeline || previous.moveInTimeline,
           confirmedPhone: validPhone || previous.confirmedPhone,
           seekerNotes: seekerNotes || previous.seekerNotes,
           updatedAt: new Date(),
         })
         .where(eq(leads.id, previous.id))
-        .returning();
+        .returning(customerLeadColumns);
       return respond({ lead: serializeCustomerLead(updated, property, await latestMeeting(previous.id)), message: "Your inquiry details have been updated." });
     }
 
+    const effectiveGroup = groupGender || "N/A";
     const [created] = await db
       .insert(leads)
       .values({
@@ -620,67 +1342,296 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         occupantsCount: occupantsCount || null,
         tenantType: tenantType || null,
         profession: profession || null,
-        groupGender: groupGender || null,
+        groupGender: effectiveGroup,
         moveInTimeline: moveInTimeline || null,
         confirmedPhone: validPhone,
-        seekerNotes: seekerNotes || null,
+        seekerNotes: seekerNotes || message || null,
+        ownerResponse: "pending",
       })
       .onConflictDoNothing()
-      .returning();
+      .returning(customerLeadColumns);
 
     if (!created) {
-      const [existing] = await db.select().from(leads).where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId))).limit(1);
+      const [existing] = await db
+        .select(customerLeadColumns)
+        .from(leads)
+        .where(and(eq(leads.customerId, user.id), eq(leads.propertyId, propertyId)))
+        .limit(1);
       return respond({ lead: serializeCustomerLead(existing, property), message: "You've already expressed interest in this property." });
     }
+
     const seekerDisplayName = user.name?.trim() || "A home seeker";
     const profileSummary = [
       tenantType ? `${tenantType}` : "",
       occupantsCount ? `(${occupantsCount})` : "",
       profession ? `· ${profession}` : "",
-      groupGender ? `· ${groupGender}` : "",
-      moveInTimeline ? `· Move-in: ${moveInTimeline}` : "",
+      effectiveGroup !== "N/A" ? `· ${effectiveGroup}` : "",
     ].filter(Boolean).join(" ");
 
+    // Fetch owner phone for WhatsApp dispatch
+    const [ownerUser] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, property.ownerId)).limit(1);
+
+    // DELIVERY CHANNEL A: WhatsApp to owner (retries with backoff; never interrupts lead/website notification)
+    if (ownerUser?.phone) {
+      void sendOwnerInterestWhatsAppWithRetry({
+        toPhone: ownerUser.phone,
+        propertyName: property.title,
+        occupantsCount: occupantsCount || "1",
+        tenantType: tenantType || "Family",
+        profession: profession || "Other",
+        groupComposition: effectiveGroup,
+        leadId: created.id,
+      }).then(async (waResult) => {
+        if (waResult.messageId) {
+          await db
+            .update(leads)
+            .set({
+              whatsappMessageId: waResult.messageId,
+              whatsappStatus: waResult.success ? "sent" : "failed",
+            })
+            .where(eq(leads.id, created.id))
+            .catch(() => null);
+        }
+      }).catch(() => null);
+    }
+
+    // DELIVERY CHANNEL B: Website real-time notification (bell icon + unread badge) & Seeker notification
     await Promise.all([
       db.insert(leadEvents).values({
         leadId: created.id,
         eventType: "created",
         detail: `${seekerDisplayName} expressed interest${profileSummary ? `: ${profileSummary}` : "."}`,
       }),
-      sendNotification(property.ownerId, "interest", `A verified home seeker (${tenantType || "seeker"}) showed interest in your property "${property.title}".`, "/owner"),
-      sendNotification(user.id, "inquiry", `Your interest in "${property.title}" was received. Our team will be in touch.`, "/inquiries"),
+      sendNotification(
+        property.ownerId,
+        "interest",
+        `New tenant interest on "${property.title}": ${occupantsCount || "1"} ${tenantType || "Family"} (${profession || "Professional"}).`,
+        "/owner"
+      ),
+      sendNotification(
+        user.id,
+        "inquiry",
+        `Your interest in "${property.title}" was received. Our team will be in touch.`,
+        "/inquiries"
+      ),
     ]);
     return respond({ lead: serializeCustomerLead(created, property), message: "Your interest has been noted. Our team will reach out to arrange a viewing or call." }, 201);
   }
   if (route === "customer/leads" && method === "GET") {
-    const user = await requireUser(request);
+    const user = await requireRole(request, "customer");
     const page = pageFrom(request);
     const [rows, [{ total }]] = await Promise.all([
-      db.select({ lead: leads, property: properties }).from(leads).innerJoin(properties, eq(leads.propertyId, properties.id)).where(eq(leads.customerId, user.id)).orderBy(desc(leads.createdAt)).limit(12).offset((page - 1) * 12),
+      db.select({ lead: customerLeadColumns, property: publicPropertyColumns }).from(leads).innerJoin(properties, eq(leads.propertyId, properties.id)).where(eq(leads.customerId, user.id)).orderBy(desc(leads.createdAt)).limit(12).offset((page - 1) * 12),
       db.select({ total: count() }).from(leads).where(eq(leads.customerId, user.id)),
     ]);
     return respond({ items: await Promise.all(rows.map(async ({ lead, property }) => serializeCustomerLead(lead, property, await latestMeeting(lead.id)))), total, page, pages: Math.ceil(total / 12) });
   }
-  if (route === "owner/leads" && method === "GET") {
+  if ((route === "owner/leads" || route === "owner/inquiries") && method === "GET") {
     const user = await requireRole(request, "owner");
     const page = pageFrom(request);
-    const customer = alias(users, "lead_customer");
+    // CRITICAL: Owner-facing code queries ONLY the dedicated ownerInquiryView, NEVER the inquiries table or customer PII.
     const [rows, [{ total }]] = await Promise.all([
-      db.select({ lead: leads, property: properties, customerName: customer.name }).from(leads).innerJoin(properties, eq(leads.propertyId, properties.id)).innerJoin(customer, eq(leads.customerId, customer.id)).where(eq(leads.ownerId, user.id)).orderBy(desc(leads.createdAt)).limit(12).offset((page - 1) * 12),
-      db.select({ total: count() }).from(leads).where(eq(leads.ownerId, user.id)),
+      db
+        .select(ownerInquiryColumns)
+        .from(ownerInquiryView)
+        .where(eq(ownerInquiryView.ownerId, user.id))
+        .orderBy(desc(ownerInquiryView.createdAt))
+        .limit(20)
+        .offset((page - 1) * 20),
+      db
+        .select({ total: count() })
+        .from(ownerInquiryView)
+        .where(eq(ownerInquiryView.ownerId, user.id)),
     ]);
-    return respond({ items: await Promise.all(rows.map(async ({ lead, property, customerName }) => serializeOwnerLead(lead, property, customerName, await latestMeeting(lead.id)))), total, page, pages: Math.ceil(total / 12) });
+    return respond({
+      items: await Promise.all(
+        rows.map(async (row) => serializeOwnerInquiry(row, await latestMeeting(row.id)))
+      ),
+      total,
+      page,
+      pages: Math.ceil(total / 20),
+    });
+  }
+  if (
+    segments[0] === "owner" &&
+    (segments[1] === "leads" || segments[1] === "inquiries") &&
+    segments.length === 3 &&
+    method === "GET"
+  ) {
+    const user = await requireRole(request, "owner");
+    const id = validId(segments[2]);
+    // ACCESS CONTROL: Query only ownerInquiryView filtered by authenticated owner ID (prevent IDOR)
+    const [row] = await db
+      .select({ ...ownerInquiryColumns, ownerId: ownerInquiryView.ownerId })
+      .from(ownerInquiryView)
+      .where(eq(ownerInquiryView.id, id))
+      .limit(1);
+
+    if (!row) {
+      fail(404, "Inquiry not found.");
+    }
+    if (row.ownerId !== user.id) {
+      fail(403, "You do not have access to this inquiry.");
+    }
+    return respond({ inquiry: serializeOwnerInquiry(row, await latestMeeting(row.id)) });
+  }
+  if (
+    segments[0] === "owner" &&
+    (segments[1] === "leads" || segments[1] === "inquiries") &&
+    segments.length === 4 &&
+    segments[3] === "response" &&
+    ["PATCH", "POST"].includes(method)
+  ) {
+    const user = await requireRole(request, "owner");
+    const id = validId(segments[2]);
+    const input = await body(
+      request,
+      z.object({
+        response: z.enum(["interested", "not_interested"]),
+      })
+    );
+
+    // Verify ownership before responding
+    const [lead] = await db
+      .select({ id: leads.id, ownerId: leads.ownerId })
+      .from(leads)
+      .where(eq(leads.id, id))
+      .limit(1);
+
+    if (!lead) {
+      fail(404, "Inquiry not found.");
+    }
+    if (lead.ownerId !== user.id) {
+      fail(403, "You do not have access to this inquiry.");
+    }
+
+    const result = await handleOwnerResponse(id, input.response, "website");
+    return respond({ success: true, message: `Response noted: ${input.response}`, result });
   }
   if (segments[0] === "leads" && segments.length === 3 && segments[2] === "meeting" && method === "GET") {
     const user = await requireUser(request);
-    const [lead] = await db.select().from(leads).where(eq(leads.id, validId(segments[1]))).limit(1);
-    if (!lead || (lead.customerId !== user.id && lead.ownerId !== user.id && !hasRole(user, "admin"))) fail(404, "Inquiry not found.");
+    const [lead] = await db
+      .select({ id: leads.id, customerId: leads.customerId, ownerId: leads.ownerId })
+      .from(leads)
+      .where(eq(leads.id, validId(segments[1])))
+      .limit(1);
+    if (!lead) fail(404, "Inquiry not found.");
+    if (lead.customerId !== user.id && lead.ownerId !== user.id && !hasRole(user, "admin")) {
+      fail(403, "You do not have access to this inquiry.");
+    }
     return respond({ meeting: serializePublicMeeting(await latestMeeting(lead.id)) });
+  }
+  if (segments[0] === "leads" && segments.length === 3 && segments[2] === "meeting" && method === "PATCH") {
+    const user = await requireUser(request);
+    const leadId = validId(segments[1]);
+    const [lead] = await db
+      .select({
+        id: leads.id,
+        customerId: leads.customerId,
+        ownerId: leads.ownerId,
+        propertyId: leads.propertyId,
+        status: leads.status,
+      })
+      .from(leads)
+      .where(eq(leads.id, leadId))
+      .limit(1);
+    if (!lead) fail(404, "Inquiry not found.");
+    const isAdminUser = hasRole(user, "admin");
+    if (lead.customerId !== user.id && lead.ownerId !== user.id && !isAdminUser) {
+      fail(403, "You do not have access to this inquiry.");
+    }
+    const input = await body(
+      request,
+      z.object({
+        status: z.enum(["confirmed", "rescheduled", "cancelled"]),
+        scheduledAt: z.string().datetime().optional(),
+      })
+    );
+    const [current] = await db
+      .select()
+      .from(meetings)
+      .where(eq(meetings.leadId, lead.id))
+      .orderBy(desc(meetings.createdAt))
+      .limit(1);
+    if (!current) fail(404, "No meeting scheduled for this inquiry.");
+
+    const transition = canTransitionMeetingStatus(current.status, input.status, {
+      hasNewScheduledAt: Boolean(input.scheduledAt),
+    });
+    if (!transition.allowed) fail(422, transition.error);
+
+    let nextScheduledAt = current.scheduledAt;
+    if (input.scheduledAt) {
+      const slot = validateVisitSlot(input.scheduledAt);
+      if (!slot.valid) fail(422, slot.error);
+      await assertNoSlotConflict(lead, slot.date, current.id);
+      nextScheduledAt = slot.date;
+    }
+
+    const [updated] = await db
+      .update(meetings)
+      .set({
+        status: input.status,
+        scheduledAt: nextScheduledAt,
+      })
+      .where(eq(meetings.id, current.id))
+      .returning();
+
+    if (input.status === "cancelled" && lead.status === "meeting_scheduled") {
+      await db.update(leads).set({ status: "contacted", updatedAt: new Date() }).where(eq(leads.id, lead.id));
+    } else if (["confirmed", "rescheduled"].includes(input.status) && ["new", "contacted"].includes(lead.status)) {
+      await db.update(leads).set({ status: "meeting_scheduled", updatedAt: new Date() }).where(eq(leads.id, lead.id));
+    }
+
+    const actorLabel = isAdminUser ? "Team" : lead.ownerId === user.id ? "Owner" : "Seeker";
+    const statusLabel = formatMeetingStatus(input.status);
+    const slotText = input.scheduledAt ? ` for ${nextScheduledAt.toISOString()}` : "";
+    await db.insert(leadEvents).values({
+      leadId: lead.id,
+      adminId: isAdminUser ? user.id : null,
+      eventType: "meeting_updated",
+      detail: `${actorLabel} marked ${current.mode === "call" ? "call" : "site visit"} as ${statusLabel}${slotText}.`,
+    });
+
+    const notificationsToSend: Array<Promise<unknown>> = [];
+    if (lead.customerId !== user.id) {
+      notificationsToSend.push(
+        sendNotification(
+          lead.customerId,
+          "meeting",
+          `${actorLabel} updated your ${current.mode === "call" ? "call" : "site visit"} status to ${statusLabel}.`,
+          "/inquiries"
+        )
+      );
+    }
+    if (lead.ownerId !== user.id) {
+      notificationsToSend.push(
+        sendNotification(
+          lead.ownerId,
+          "meeting",
+          `${actorLabel} updated the ${current.mode === "call" ? "call" : "site visit"} status to ${statusLabel}.`,
+          "/owner"
+        )
+      );
+    }
+    if (current.scheduledByAdminId && current.scheduledByAdminId !== user.id) {
+      notificationsToSend.push(
+        sendNotification(
+          current.scheduledByAdminId,
+          "meeting",
+          `${actorLabel} marked lead visit as ${statusLabel}${input.status === "rescheduled" ? " — review new slot." : "."}`,
+          "/admin"
+        )
+      );
+    }
+    await Promise.all(notificationsToSend);
+
+    return respond({ meeting: serializePublicMeeting(updated) });
   }
 
   if (route === "favorites" && method === "GET") {
     const user = await requireUser(request);
-    const rows = await db.select({ property: properties }).from(favorites).innerJoin(properties, eq(favorites.propertyId, properties.id)).where(and(eq(favorites.userId, user.id), eq(properties.status, "live"))).orderBy(desc(favorites.createdAt)).limit(100);
+    const rows = await db.select({ property: publicPropertyColumns }).from(favorites).innerJoin(properties, eq(favorites.propertyId, properties.id)).where(and(eq(favorites.userId, user.id), eq(properties.status, "live"), eq(properties.category, "rent_home"))).orderBy(desc(favorites.createdAt)).limit(100);
     return respond({ items: rows.map(({ property }) => serializePublicProperty(property)) });
   }
   if (segments[0] === "favorites" && segments.length === 2 && ["POST", "DELETE"].includes(method)) {
@@ -699,7 +1650,20 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const user = await requireUser(request);
     const page = pageFrom(request);
     const [items, [{ total }], [{ unread }]] = await Promise.all([
-      db.select().from(notifications).where(eq(notifications.userId, user.id)).orderBy(desc(notifications.createdAt)).limit(20).offset((page - 1) * 20),
+      db
+        .select({
+          id: notifications.id,
+          type: notifications.type,
+          message: notifications.message,
+          link: notifications.link,
+          isRead: notifications.isRead,
+          createdAt: notifications.createdAt,
+        })
+        .from(notifications)
+        .where(eq(notifications.userId, user.id))
+        .orderBy(desc(notifications.createdAt))
+        .limit(20)
+        .offset((page - 1) * 20),
       db.select({ total: count() }).from(notifications).where(eq(notifications.userId, user.id)),
       db.select({ unread: count() }).from(notifications).where(and(eq(notifications.userId, user.id), eq(notifications.isRead, false))),
     ]);
@@ -712,98 +1676,20 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   }
   if (segments[0] === "notifications" && segments.length === 2 && method === "PATCH") {
     const user = await requireUser(request);
-    await db.update(notifications).set({ isRead: true }).where(and(eq(notifications.id, validId(segments[1])), eq(notifications.userId, user.id)));
+    const id = validId(segments[1]);
+    const [existing] = await db.select({ id: notifications.id, userId: notifications.userId }).from(notifications).where(eq(notifications.id, id)).limit(1);
+    if (!existing) fail(404, "Notification not found.");
+    if (existing.userId !== user.id) fail(403, "You do not have access to this notification.");
+    await db.update(notifications).set({ isRead: true }).where(and(eq(notifications.id, id), eq(notifications.userId, user.id)));
     return respond({ ok: true });
   }
   if (route === "profile" && method === "GET") return respond({ user: publicSelf(await requireUser(request)) });
   if (route === "profile" && method === "PATCH") {
-    const user = await requireUser(request);
-    const input = await body(request, z.object({
-      name: z.string().trim().min(2).max(150).optional(),
-      city: z.string().trim().min(2).max(120).optional(),
-      location: z.string().trim().max(255).optional(),
-      phone: z.string().trim().min(10, "Phone number must be at least 10 digits").max(20).optional(),
-      email: z.union([z.email(), z.literal("")]).optional(),
-      role: z.enum(["customer", "owner"]).optional(),
-      addOwnerRole: z.boolean().optional(),
-      consent: z.boolean().optional(),
-    }));
+    return await handleUserProfileUpdate(request, false);
+  }
 
-    if (input.location !== undefined && (!input.location || input.location.trim().length === 0)) {
-      fail(422, "Location is required and cannot be empty.");
-    }
-
-    let cleanPhone: string | undefined = undefined;
-    if (input.phone) {
-      const raw = input.phone.trim();
-      const core = raw.startsWith("+91")
-        ? raw.slice(3)
-        : (raw.startsWith("91") && raw.length === 12 ? raw.slice(2) : raw);
-
-      // Strict numeric-only validation: letters, spaces, and symbols are completely rejected
-      if (!/^\d+$/.test(core)) {
-        fail(422, "Phone number must contain only numeric digits (0–9). Letters and special characters are not allowed.");
-      }
-      if (core.length !== 10) {
-        fail(422, "Phone number must be exactly 10 digits.");
-      }
-      if (!/^[6-9]\d{9}$/.test(core)) {
-        fail(422, "Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
-      }
-      cleanPhone = `+91${core}`;
-      const [existing] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(or(eq(users.phone, cleanPhone), eq(users.phone, core)), sql`${users.id} != ${user.id}`))
-        .limit(1);
-      if (existing) {
-        fail(409, "This phone number is already registered with another account.");
-      }
-    }
-
-    if (input.addOwnerRole && !user.phone && !cleanPhone) {
-      fail(422, "A verified phone number is required to activate owner tools.");
-    }
-
-    let cleanEmail: string | null | undefined = undefined;
-    if (input.email !== undefined) {
-      cleanEmail = input.email ? input.email.trim().toLowerCase() : null;
-      if (cleanEmail && cleanEmail !== user.email) {
-        const [existingEmail] = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(and(eq(users.email, cleanEmail), sql`${users.id} != ${user.id}`))
-          .limit(1);
-        if (existingEmail) {
-          fail(409, "This email is already registered with another account.");
-        }
-      }
-    }
-
-    const isOwner = input.role === "owner" || !!input.addOwnerRole;
-    let roles: Array<"customer" | "owner" | "admin"> = user.roles;
-    if (isOwner && !roles.includes("owner")) {
-      roles = [...roles, "owner"];
-    } else if (input.role === "customer" && !roles.includes("admin")) {
-      roles = ["customer"];
-    }
-
-    if (input.consent === false) fail(422, "Consent is required to use your account. You may delete your account instead.");
-
-    const targetLocation = (input.location || input.city)?.trim();
-
-    const [updated] = await db.update(users).set({
-      ...(input.name ? { name: input.name.trim() } : {}),
-      ...(targetLocation ? { location: targetLocation, city: targetLocation } : {}),
-      ...(cleanPhone ? { phone: cleanPhone } : {}),
-      ...(cleanEmail !== undefined ? { email: cleanEmail } : {}),
-      roles,
-      role: roles.includes("owner") && user.role !== "admin" ? "owner" : (input.role === "customer" && user.role !== "admin" ? "customer" : user.role),
-      ...(input.consent ? { consentAt: new Date() } : {}),
-      updatedAt: new Date(),
-    }).where(eq(users.id, user.id)).returning();
-
-    return respond({ user: publicSelf(updated) });
+  if ((route === "auth/onboarding" || route === "onboarding") && (method === "POST" || method === "PATCH")) {
+    return await handleUserProfileUpdate(request, true);
   }
   if (route === "profile" && method === "DELETE") {
     const user = await requireUser(request);
@@ -824,7 +1710,11 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   }
   if (segments[0] === "saved-searches" && segments.length === 2 && method === "DELETE") {
     const user = await requireUser(request);
-    await db.delete(savedSearches).where(and(eq(savedSearches.id, validId(segments[1])), eq(savedSearches.userId, user.id)));
+    const id = validId(segments[1]);
+    const [existing] = await db.select({ id: savedSearches.id, userId: savedSearches.userId }).from(savedSearches).where(eq(savedSearches.id, id)).limit(1);
+    if (!existing) fail(404, "Saved search not found.");
+    if (existing.userId !== user.id) fail(403, "You do not have access to this saved search.");
+    await db.delete(savedSearches).where(and(eq(savedSearches.id, id), eq(savedSearches.userId, user.id)));
     return respond({ ok: true });
   }
 
@@ -833,15 +1723,19 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (!hasRole(user, "owner") && !hasRole(user, "admin")) fail(403, "Only property owners and administrators can upload listing photos.");
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 10 MB.");
-    
-    const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/jpg"];
-    const fileType = file.type || (file.name.endsWith(".png") ? "image/png" : file.name.endsWith(".webp") ? "image/webp" : "image/jpeg");
-    if (!allowedMimes.includes(fileType) && !file.name.match(/\.(jpg|jpeg|png|webp|heic|heif)$/i)) {
-      throw new HttpError(422, "Upload a JPG, PNG, or WebP image under 10 MB.");
+    if (!(file instanceof File)) throw new HttpError(422, "Upload a genuine JPG, PNG, or WebP image under 10 MB.");
+
+    const existingCountRaw = form.get("existingCount");
+    if (existingCountRaw !== null && Number(existingCountRaw) >= MAX_LISTING_IMAGES) {
+      throw new HttpError(422, `Maximum ${MAX_LISTING_IMAGES} property photos allowed.`);
     }
-    if (file.size > 10 * 1024 * 1024 || file.size === 0) throw new HttpError(422, "Upload an image under 10 MB.");
+
     const bytes = Buffer.from(await file.arrayBuffer());
+    const imageCheck = validateImageUploadBytes(bytes, file.size);
+    if (!imageCheck.valid) {
+      throw new HttpError(422, imageCheck.error);
+    }
+    const { mime: fileType, ext } = imageCheck.format;
 
     // 1. Cloudinary upload (if configured)
     if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
@@ -850,7 +1744,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         const folder = "aangan/properties";
         const signature = createHash("sha1").update(`folder=${folder}&timestamp=${timestamp}${process.env.CLOUDINARY_API_SECRET}`).digest("hex");
         const upload = new FormData();
-        upload.append("file", new Blob([new Uint8Array(bytes)], { type: fileType }), file.name);
+        upload.append("file", new Blob([new Uint8Array(bytes)], { type: fileType }), `${randomUUID()}.${ext}`);
         upload.append("api_key", process.env.CLOUDINARY_API_KEY);
         upload.append("timestamp", String(timestamp));
         upload.append("folder", folder);
@@ -858,7 +1752,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         const result = await fetch(`https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: upload });
         if (result.ok) {
           const data = await result.json() as { secure_url: string };
-          return respond({ url: data.secure_url }, 201);
+          return respond({ url: data.secure_url, mime: fileType }, 201);
         }
       } catch (err) {
         console.warn("[Uploads] Cloudinary upload failed:", err);
@@ -869,7 +1763,6 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || (process.env.SUPABASE_ANON_KEY && !process.env.SUPABASE_ANON_KEY.startsWith("sb_publishable_")))) {
       try {
         const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!;
-        const ext = fileType === "image/png" ? "png" : fileType === "image/webp" ? "webp" : "jpg";
         const filename = `${randomUUID()}.${ext}`;
         const uploadRes = await fetch(`${process.env.SUPABASE_URL}/storage/v1/object/property-images/${filename}`, {
           method: "POST",
@@ -882,7 +1775,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         });
         if (uploadRes.ok) {
           const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/property-images/${filename}`;
-          return respond({ url: publicUrl }, 201);
+          return respond({ url: publicUrl, mime: fileType }, 201);
         }
       } catch (err) {
         console.warn("[Uploads] Supabase storage upload failed:", err);
@@ -890,13 +1783,12 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
 
     // 3. PostgreSQL Database-backed storage (100% reliable on Vercel and locally)
-    const ext = fileType === "image/png" ? "png" : fileType === "image/webp" ? "webp" : "jpg";
     const filename = `${randomUUID()}.${ext}`;
     const base64Data = bytes.toString("base64");
 
     const [record] = await db.insert(uploadedImages).values({
       filename,
-      contentType: fileType === "image/png" ? "image/png" : fileType === "image/webp" ? "image/webp" : "image/jpeg",
+      contentType: fileType,
       data: base64Data,
       size: bytes.length,
     }).returning({ id: uploadedImages.id });
@@ -912,7 +1804,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       }
     }
 
-    return respond({ url: `/api/uploads/${record.id}.${ext}` }, 201);
+    return respond({ url: `/api/uploads/${record.id}.${ext}`, mime: fileType }, 201);
   }
   if (segments[0] === "uploads" && segments.length === 2 && method === "GET") {
     const rawFilename = segments[1];
@@ -1003,24 +1895,103 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
     if (route === "admin/meetings" && method === "POST") {
       const input = await body(request, z.object({ leadId: uuid, scheduledAt: z.string().datetime(), mode: z.enum(["call", "site_visit"]) }));
-      const time = new Date(input.scheduledAt);
-      if (time <= new Date()) fail(422, "Choose a time in the future.");
+      const slot = validateVisitSlot(input.scheduledAt);
+      if (!slot.valid) fail(422, slot.error);
+      const time = slot.date;
       const [lead] = await db.select().from(leads).where(eq(leads.id, input.leadId)).limit(1);
       if (!lead) fail(404, "Lead not found.");
-      const [meeting] = await db.insert(meetings).values({ leadId: lead.id, scheduledByAdminId: admin.id, scheduledAt: time, mode: input.mode, status: "proposed" }).returning();
-      await db.update(leads).set({ status: "meeting_scheduled", updatedAt: new Date() }).where(eq(leads.id, lead.id));
-      await db.insert(leadEvents).values({ leadId: lead.id, adminId: admin.id, eventType: "meeting_proposed", detail: `${input.mode === "call" ? "Call" : "Site visit"} proposed for ${time.toISOString()}.` });
-      await Promise.all([sendNotification(lead.customerId, "meeting", "A viewing or call has been proposed. Check your inquiries for details.", "/inquiries"), sendNotification(lead.ownerId, "meeting", "A viewing or call has been proposed for your listing. Check your interests for details.", "/owner")]);
+
+      const existingActive = await db
+        .select({ id: meetings.id })
+        .from(meetings)
+        .where(and(eq(meetings.leadId, lead.id), inArray(meetings.status, ACTIVE_MEETING_STATUSES)))
+        .orderBy(desc(meetings.createdAt));
+
+      const latestActiveId = existingActive[0]?.id;
+      await assertNoSlotConflict(lead, time, latestActiveId);
+
+      if (existingActive.length > 0) {
+        await db
+          .update(meetings)
+          .set({ status: "cancelled" })
+          .where(and(eq(meetings.leadId, lead.id), inArray(meetings.status, ACTIVE_MEETING_STATUSES)));
+      }
+
+      const initialStatus = existingActive.length > 0 ? "rescheduled" : "proposed";
+      const [meeting] = await db.insert(meetings).values({ leadId: lead.id, scheduledByAdminId: admin.id, scheduledAt: time, mode: input.mode, status: initialStatus }).returning();
+      if (!["closed_won", "closed_lost"].includes(lead.status)) {
+        await db.update(leads).set({ status: "meeting_scheduled", updatedAt: new Date() }).where(eq(leads.id, lead.id));
+      }
+      await db.insert(leadEvents).values({ leadId: lead.id, adminId: admin.id, eventType: initialStatus === "rescheduled" ? "meeting_rescheduled" : "meeting_proposed", detail: `${input.mode === "call" ? "Call" : "Site visit"} ${initialStatus} for ${time.toISOString()}.` });
+      const label = initialStatus === "rescheduled" ? "rescheduled" : "proposed";
+      await Promise.all([
+        sendNotification(lead.customerId, "meeting", `A viewing or call has been ${label}. Check your inquiries for details.`, "/inquiries"),
+        sendNotification(lead.ownerId, "meeting", `A viewing or call has been ${label} for your listing. Check your interests for details.`, "/owner"),
+      ]);
       return respond({ meeting: serializePublicMeeting(meeting) }, 201);
     }
     if (segments[1] === "meetings" && segments.length === 3 && method === "PATCH") {
       const id = validId(segments[2]);
-      const { status } = await body(request, z.object({ status: z.enum(["proposed", "confirmed", "completed", "cancelled"]) }));
-      const [meeting] = await db.update(meetings).set({ status }).where(eq(meetings.id, id)).returning();
-      if (!meeting) fail(404, "Meeting not found.");
-      const [lead] = await db.select().from(leads).where(eq(leads.id, meeting.leadId)).limit(1);
-      await db.insert(leadEvents).values({ leadId: lead.id, adminId: admin.id, eventType: "meeting_updated", detail: `Meeting ${status}.` });
-      await Promise.all([sendNotification(lead.customerId, "meeting", `Your viewing or call is ${status}.`, "/inquiries"), sendNotification(lead.ownerId, "meeting", `A viewing or call for your listing is ${status}.`, "/owner")]);
+      const input = await body(
+        request,
+        z.object({
+          status: z.enum(["proposed", "confirmed", "rescheduled", "completed", "cancelled"]),
+          scheduledAt: z.string().datetime().optional(),
+          mode: z.enum(["call", "site_visit"]).optional(),
+        })
+      );
+      const [existing] = await db.select().from(meetings).where(eq(meetings.id, id)).limit(1);
+      if (!existing) fail(404, "Meeting not found.");
+
+      const transition = canTransitionMeetingStatus(existing.status, input.status, {
+        hasNewScheduledAt: Boolean(input.scheduledAt),
+      });
+      if (!transition.allowed) fail(422, transition.error);
+
+      const [lead] = await db.select().from(leads).where(eq(leads.id, existing.leadId)).limit(1);
+      if (!lead) fail(404, "Lead not found.");
+
+      let nextScheduledAt = existing.scheduledAt;
+      if (input.status === "rescheduled") {
+        if (!input.scheduledAt) fail(422, "Choose a new date and time to reschedule the visit.");
+        const slot = validateVisitSlot(input.scheduledAt);
+        if (!slot.valid) fail(422, slot.error);
+        await assertNoSlotConflict(lead, slot.date, existing.id);
+        nextScheduledAt = slot.date;
+      } else if (input.scheduledAt) {
+        const slot = validateVisitSlot(input.scheduledAt);
+        if (!slot.valid) fail(422, slot.error);
+        await assertNoSlotConflict(lead, slot.date, existing.id);
+        nextScheduledAt = slot.date;
+      }
+
+      const [meeting] = await db
+        .update(meetings)
+        .set({
+          status: input.status,
+          scheduledAt: nextScheduledAt,
+          mode: input.mode ?? existing.mode,
+        })
+        .where(eq(meetings.id, id))
+        .returning();
+
+      if (input.status === "cancelled" && lead.status === "meeting_scheduled") {
+        await db.update(leads).set({ status: "contacted", updatedAt: new Date() }).where(eq(leads.id, lead.id));
+      } else if (["confirmed", "rescheduled"].includes(input.status) && ["new", "contacted"].includes(lead.status)) {
+        await db.update(leads).set({ status: "meeting_scheduled", updatedAt: new Date() }).where(eq(leads.id, lead.id));
+      }
+
+      const readable = formatMeetingStatus(input.status);
+      await db.insert(leadEvents).values({
+        leadId: lead.id,
+        adminId: admin.id,
+        eventType: "meeting_updated",
+        detail: `Meeting ${readable}${input.scheduledAt ? ` (${nextScheduledAt.toISOString()})` : ""}.`,
+      });
+      await Promise.all([
+        sendNotification(lead.customerId, "meeting", `Your viewing or call is now ${readable.toLowerCase()}.`, "/inquiries"),
+        sendNotification(lead.ownerId, "meeting", `A viewing or call for your listing is now ${readable.toLowerCase()}.`, "/owner"),
+      ]);
       return respond({ meeting: serializePublicMeeting(meeting) });
     }
     if (route === "admin/properties" && method === "GET") {
@@ -1031,12 +2002,18 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
 
       const conditions: any[] = [];
-      if (status && status !== "all" && ["pending_review", "live", "paused", "rejected", "sold", "rented"].includes(status)) {
+      if (status && status !== "all" && ["draft", "pending_review", "live", "paused", "rejected", "sold", "rented"].includes(status)) {
         conditions.push(eq(properties.status, status as Property["status"]));
+      } else {
+        conditions.push(ne(properties.status, "draft"));
       }
-      if (category && ["buy_home", "rent_home", "rent_pg", "rent_commercial"].includes(category)) {
-        conditions.push(eq(properties.category, category as Property["category"]));
+      if (category) {
+        const catLower = category.toLowerCase().trim();
+        if (["buy", "buy_home", "sale", "purchase", "pg", "rent_pg", "paying_guest", "paying guest", "coliving", "co-living", "commercial", "rent_commercial", "office", "retail", "shop"].includes(catLower)) {
+          fail(422, "Only residential home rentals are supported. Buy, PG, and Commercial queries are rejected.");
+        }
       }
+      conditions.push(eq(properties.category, "rent_home"));
       if (q) {
         conditions.push(or(
           ilike(properties.title, `%${q}%`),
@@ -1069,7 +2046,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
       return respond({
         items: items.map(({ property, owner }) => ({
-          ...serializePublicProperty(property),
+          ...serializeAdminProperty(property),
           status: property.status,
           views: property.views,
           liveSelfieUrl: property.liveSelfieUrl,
@@ -1121,7 +2098,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (segments[1] === "properties" && segments.length === 3 && method === "DELETE") {
       const id = validId(segments[2]);
       const [existing] = await db.select().from(properties).where(eq(properties.id, id)).limit(1);
-      if (!existing) fail(404, "Listing not found.");
+      if (!existing || existing.category !== "rent_home") fail(404, "Listing not found.");
       await db.delete(properties).where(eq(properties.id, id));
       return respond({ message: "Listing permanently deleted by admin." });
     }
@@ -1162,6 +2139,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
             email: users.email,
             role: users.role,
             roles: users.roles,
+            lastLogin: users.lastLogin,
             consentAt: users.consentAt,
             otpVerifiedAt: users.otpVerifiedAt,
             createdAt: users.createdAt,
@@ -1205,6 +2183,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           city: u.city || u.location,
           category: isAdmin ? "admin" : isOwner ? "owner" : "customer",
           categoryLabel: isAdmin ? "Platform Admin" : isOwner ? "Owner / Rent" : "Home Seeker",
+          lastLogin: u.lastLogin,
           listingsCount: propCounts[u.id] || 0,
           inquiriesCount: leadCounts[u.id] || 0,
         };
@@ -1214,7 +2193,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
 
     if (segments[0] === "admin" && segments[1] === "users" && segments.length === 3 && method === "GET") {
-      const id = segments[2];
+      const id = validId(segments[2]);
       const [u] = await db.select().from(users).where(eq(users.id, id)).limit(1);
       if (!u) fail(404, "User not found.");
 
@@ -1264,6 +2243,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           location: u.location,
           role: u.role,
           roles: u.roles,
+          lastLogin: u.lastLogin,
           consentAt: u.consentAt,
           otpVerifiedAt: u.otpVerifiedAt,
           createdAt: u.createdAt,
@@ -1280,11 +2260,11 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     if (route === "admin/dashboard/stats" && method === "GET") {
       const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], [{ totalUsers }], [{ totalOwners }], [{ seekerCount }], recent] = await Promise.all([
-        db.select({ category: properties.category, total: count() }).from(properties).where(eq(properties.status, "live")).groupBy(properties.category),
+        db.select({ category: properties.category, total: count() }).from(properties).where(and(eq(properties.status, "live"), eq(properties.category, "rent_home"))).groupBy(properties.category),
         db.select({ status: leads.status, total: count() }).from(leads).groupBy(leads.status),
         db.select({ total: count() }).from(leads),
-        db.select({ pending: count() }).from(properties).where(eq(properties.status, "pending_review")),
-        db.select({ totalAll: count() }).from(properties),
+        db.select({ pending: count() }).from(properties).where(and(eq(properties.status, "pending_review"), eq(properties.category, "rent_home"))),
+        db.select({ totalAll: count() }).from(properties).where(eq(properties.category, "rent_home")),
         db.select({ totalUsers: count() }).from(users),
         db.select({ totalOwners: count() }).from(users).where(and(sql`${users.roles}::jsonb ? 'owner'`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
         db.select({ seekerCount: count() }).from(users).where(and(sql`NOT (${users.roles}::jsonb ? 'owner')`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
@@ -1307,6 +2287,53 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0,
       });
     }
+  }
+
+  if (route === "whatsapp/webhook" && method === "GET") {
+    const mode = request.nextUrl.searchParams.get("hub.mode");
+    const token = request.nextUrl.searchParams.get("hub.verify_token");
+    const challenge = request.nextUrl.searchParams.get("hub.challenge");
+    const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "aangan_wa_verify_secret";
+    if (mode === "subscribe" && token === verifyToken) {
+      return new NextResponse(challenge || "", { status: 200 });
+    }
+    fail(403, "Webhook verification failed.");
+  }
+
+  if (route === "whatsapp/webhook" && method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as any;
+    try {
+      const entry = body?.entry?.[0];
+      const change = entry?.changes?.[0];
+      const messageObj = change?.value?.messages?.[0];
+
+      if (messageObj) {
+        const payloadStr = (messageObj?.button?.payload || messageObj?.interactive?.button_reply?.id || "") as string;
+        const textBody = (messageObj?.text?.body?.trim()?.toLowerCase() || "") as string;
+
+        let responseType: "interested" | "not_interested" | null = null;
+        let leadId = "";
+
+        if (payloadStr.startsWith("INTERESTED_")) {
+          responseType = "interested";
+          leadId = payloadStr.replace("INTERESTED_", "");
+        } else if (payloadStr.startsWith("NOT_INTERESTED_")) {
+          responseType = "not_interested";
+          leadId = payloadStr.replace("NOT_INTERESTED_", "");
+        } else if (textBody === "interested") {
+          responseType = "interested";
+        } else if (textBody.includes("not interested")) {
+          responseType = "not_interested";
+        }
+
+        if (responseType && uuid.safeParse(leadId).success) {
+          await handleOwnerResponse(leadId, responseType, "whatsapp");
+        }
+      }
+    } catch (e) {
+      console.error("WhatsApp webhook processing error:", e);
+    }
+    return respond({ status: "ok" });
   }
   throw new HttpError(404, "Endpoint not found.");
 }

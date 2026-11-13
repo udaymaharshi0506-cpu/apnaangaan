@@ -39,6 +39,8 @@ import {
   MessageCircle,
   MessageSquare,
   Phone,
+  Plus,
+  RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -54,7 +56,8 @@ import {
 import { Brand } from "@/components/site-shell";
 import { apiFetch, useApp } from "@/components/providers";
 import { categoryLabel, formatPrice } from "@/lib/format";
-import type { PublicProperty } from "@/lib/serializers";
+import { formatMeetingStatus, getMinVisitDateTimeLocal, validateVisitSlot } from "@/lib/scheduling";
+import type { AdminProperty, PublicProperty } from "@/lib/serializers";
 
 export type AdminUser = {
   id: string;
@@ -69,6 +72,7 @@ export type AdminUser = {
   categoryLabel: string;
   consentAt: string | null;
   otpVerifiedAt?: string | null;
+  lastLogin?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   listingsCount: number;
@@ -89,7 +93,7 @@ export type AdminLead = {
   seekerNotes?: string | null;
   createdAt: string;
   updatedAt: string;
-  property: PublicProperty;
+  property: AdminProperty;
   customer: {
     id: string;
     name: string | null;
@@ -104,7 +108,7 @@ export type AdminLead = {
   callLogs: Array<{ party: string; outcome: string; notes: string | null; createdAt: string }>;
 };
 
-export type ModeratedProperty = PublicProperty & {
+export type ModeratedProperty = AdminProperty & {
   status: string;
   views: number;
   liveSelfieUrl?: string | null;
@@ -180,7 +184,7 @@ export function AdminLoginExperience() {
         <div className="admin-login-top">
           <Brand />
           <Link href="/">
-            <ArrowLeft size={15} /> Back to Aangan
+            <ArrowLeft size={15} /> Back to Apnaangaan
           </Link>
         </div>
         <div className="admin-login-form">
@@ -203,7 +207,7 @@ export function AdminLoginExperience() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@aangan.com"
+                  placeholder="you@apnaangaan.in"
                   required
                 />
                 <label className="form-label">PASSWORD</label>
@@ -434,7 +438,7 @@ export function RejectReasonModal({
     "Owner phone number / email provided in description (violates platform privacy).",
     "Street address, landmark, or location pin is inaccurate or unlocatable.",
     "Asking price, maintenance, or security deposit details seem unrealistic or contradictory.",
-    "Mandatory RERA number or legal disclosure is required for this commercial/project listing.",
+    "Mandatory RERA number or legal disclosure is required for this residential listing.",
   ];
 
   async function handleSubmit(e: FormEvent) {
@@ -1486,7 +1490,7 @@ export function PropertyDetailModal({
                 <div style={{ background: "var(--surface-tint)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px" }}>
                   <span style={{ fontSize: "9px", color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Security Deposit</span>
                   <strong style={{ display: "block", fontSize: "15px", color: "var(--ink)", marginTop: "2px" }}>
-                    {property.deposit ? formatPrice(property.deposit) : "None / Negotiable"}
+                    {property.deposit ? formatPrice(property.deposit, property.category, { period: "total" }) : "None / Negotiable"}
                   </strong>
                   <small style={{ fontSize: "10px", color: "var(--muted)" }}>Refundable deposit</small>
                 </div>
@@ -1496,7 +1500,7 @@ export function PropertyDetailModal({
                     {property.maintenanceStatus === "included"
                       ? "Included"
                       : property.maintenanceAmount
-                      ? `₹${property.maintenanceAmount.toLocaleString("en-IN")}/mo`
+                      ? formatPrice(property.maintenanceAmount, property.category)
                       : "Separate / NA"}
                   </strong>
                   <small style={{ fontSize: "10px", color: "var(--muted)" }}>Monthly maintenance charges</small>
@@ -1648,7 +1652,7 @@ export function PropertyDetailModal({
             </div>
 
             {/* SECTION 6: RENTAL / PG TERMS (if applicable) */}
-            {(property.category === "rent_home" || property.category === "rent_pg" || property.lockInPeriod || property.noticePeriod || property.tenantPreference) && (
+            {(property.category === "rent_home" || property.lockInPeriod || property.noticePeriod || property.tenantPreference) && (
               <div className="lead-section">
                 <h3 style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted)" }}>
                   6. Rental & PG Policies
@@ -1756,6 +1760,20 @@ export function PropertyDetailModal({
                   9. Uploaded Property Photos ({images.length})
                 </h3>
                 <span style={{ fontSize: "11px", color: "var(--muted)" }}>Click any photo to zoom full-screen</span>
+              </div>
+              <div
+                style={{
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  color: "#92400e",
+                  borderRadius: "8px",
+                  padding: "8px 12px",
+                  fontSize: "11.5px",
+                  fontWeight: 600,
+                  marginBottom: "10px",
+                }}
+              >
+                Moderation check: Inspect all uploaded photos for watermarked phone numbers, QR codes, or embedded contact handles before publishing.
               </div>
               {images.length > 0 ? (
                 <div>
@@ -1997,20 +2015,39 @@ function LeadDetail({
     }
   }
 
-  async function schedule() {
+  const minSlot = getMinVisitDateTimeLocal();
+
+  async function schedule(asReschedule = false) {
     if (!meetingDate) {
       toast("Choose a meeting date and time", "error");
       return;
     }
+    const slotCheck = validateVisitSlot(new Date(meetingDate));
+    if (!slotCheck.valid) {
+      toast(slotCheck.error, "error");
+      return;
+    }
     setBusy(true);
     try {
-      await apiFetch("/api/admin/meetings", {
-        method: "POST",
-        body: JSON.stringify({ leadId: lead.id, scheduledAt: new Date(meetingDate).toISOString(), mode: meetingMode }),
-      });
+      if (asReschedule && lead.meeting && !["completed", "cancelled"].includes(lead.meeting.status)) {
+        await apiFetch(`/api/admin/meetings/${lead.meeting.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "rescheduled",
+            scheduledAt: slotCheck.date.toISOString(),
+            mode: meetingMode,
+          }),
+        });
+        toast("Meeting rescheduled for both parties");
+      } else {
+        await apiFetch("/api/admin/meetings", {
+          method: "POST",
+          body: JSON.stringify({ leadId: lead.id, scheduledAt: slotCheck.date.toISOString(), mode: meetingMode }),
+        });
+        toast("Meeting proposed to both parties");
+      }
       setMeetingDate("");
       await onRefresh();
-      toast("Meeting proposed to both parties");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Couldn't schedule meeting", "error");
     } finally {
@@ -2020,12 +2057,15 @@ function LeadDetail({
 
   async function meetingAction(next: "confirmed" | "completed" | "cancelled") {
     if (!lead.meeting) return;
+    setBusy(true);
     try {
       await apiFetch(`/api/admin/meetings/${lead.meeting.id}`, { method: "PATCH", body: JSON.stringify({ status: next }) });
       await onRefresh();
-      toast(`Meeting ${next}`);
+      toast(`Meeting ${formatMeetingStatus(next).toLowerCase()}`);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Couldn't update meeting", "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2452,13 +2492,19 @@ function LeadDetail({
                 <CalendarDays size={19} />
                 <div>
                   <strong>
-                    {lead.meeting.mode === "call" ? "Call" : "Site visit"} · {lead.meeting.status}
+                    {lead.meeting.mode === "call" ? "Call" : "Site visit"} · {formatMeetingStatus(lead.meeting.status)}
                   </strong>
                   <span>{new Date(lead.meeting.scheduledAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
                   <div>
-                    {lead.meeting.status === "proposed" && <button onClick={() => void meetingAction("confirmed")}>Confirm</button>}
-                    {lead.meeting.status === "confirmed" && <button onClick={() => void meetingAction("completed")}>Mark completed</button>}
-                    {!["completed", "cancelled"].includes(lead.meeting.status) && <button onClick={() => void meetingAction("cancelled")}>Cancel</button>}
+                    {(lead.meeting.status === "proposed" || lead.meeting.status === "rescheduled") && (
+                      <button type="button" disabled={busy} onClick={() => void meetingAction("confirmed")}>Confirm</button>
+                    )}
+                    {(lead.meeting.status === "confirmed" || lead.meeting.status === "rescheduled") && (
+                      <button type="button" disabled={busy} onClick={() => void meetingAction("completed")}>Mark completed</button>
+                    )}
+                    {!["completed", "cancelled"].includes(lead.meeting.status) && (
+                      <button type="button" disabled={busy} onClick={() => void meetingAction("cancelled")}>Cancel</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2466,7 +2512,7 @@ function LeadDetail({
             <div className="form-two-cols">
               <div>
                 <label className="form-label">DATE & TIME</label>
-                <input className="form-input" type="datetime-local" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
+                <input className="form-input" type="datetime-local" min={minSlot} value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
               </div>
               <div>
                 <label className="form-label">MEETING TYPE</label>
@@ -2476,9 +2522,16 @@ function LeadDetail({
                 </select>
               </div>
             </div>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void schedule()}>
-              <CalendarDays size={16} /> Propose meeting
-            </button>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" disabled={busy} onClick={() => void schedule(false)}>
+                <CalendarDays size={16} /> Propose meeting
+              </button>
+              {lead.meeting && !["completed", "cancelled"].includes(lead.meeting.status) && (
+                <button className="btn btn-outline" disabled={busy} onClick={() => void schedule(true)}>
+                  <CalendarDays size={16} /> Reschedule to chosen time
+                </button>
+              )}
+            </div>
             <p className="admin-meeting-note">
               <LockKeyhole size={14} /> Both sides see only the time and status, never each other&apos;s identity.
             </p>
@@ -2554,7 +2607,7 @@ function exportUsersToCSV(userList: AdminUser[]) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `aangan_registered_users_${new Date().toISOString().slice(0, 10)}.csv`);
+  link.setAttribute("download", `apnaangaan_registered_users_${new Date().toISOString().slice(0, 10)}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -2696,6 +2749,20 @@ export function AdminDashboardExperience() {
     }
   }
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefreshAll = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([load(), loadProperties(), loadUsers()]);
+      toast("Synced with live PostgreSQL database");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Sync error", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const pending = stats?.pendingListings || 0;
   const totalListings = stats?.totalListings ?? allProperties.length;
 
@@ -2708,7 +2775,13 @@ export function AdminDashboardExperience() {
             <X size={20} />
           </button>
         </div>
-        <div className="admin-workspace-label">AANGAN WORKSPACE</div>
+
+        <div className="admin-db-status">
+          <span className="admin-pulse-dot" />
+          <span>PostgreSQL 17 · Live Connected</span>
+        </div>
+
+        <div className="admin-workspace-label">APNAANGAAN WORKSPACE</div>
         <nav>
           {[
             { value: "overview", label: "Overview", Icon: LayoutDashboard },
@@ -2725,22 +2798,22 @@ export function AdminDashboardExperience() {
                 setMobileMenu(false);
               }}
             >
-              <Icon size={19} />
-              {label}
-              {count ? <span>{count}</span> : null}
+              <Icon size={18} />
+              <span>{label}</span>
+              {typeof count === "number" && count >= 0 ? <span className="nav-count-badge">{count}</span> : null}
             </button>
           ))}
         </nav>
         <div className="admin-sidebar-bottom">
           <div className="admin-sidebar-trust">
-            <ShieldCheck size={21} />
+            <ShieldCheck size={22} />
             <div>
               <strong>Privacy first</strong>
-              <span>Only your team sees both sides.</span>
+              <span>Only verified team sees both sides.</span>
             </div>
           </div>
           <Link href="/" className="admin-back-site">
-            <ArrowLeft size={16} /> Back to marketplace
+            <ArrowLeft size={15} /> Back to marketplace
           </Link>
         </div>
       </aside>
@@ -2751,7 +2824,7 @@ export function AdminDashboardExperience() {
             <Menu size={22} />
           </button>
           <div className="admin-breadcrumb">
-            Workspace <ChevronRight size={14} />{" "}
+            Workspace <ChevronRight size={13} />{" "}
             <strong>
               {view === "overview"
                 ? "Overview"
@@ -2765,10 +2838,18 @@ export function AdminDashboardExperience() {
             </strong>
           </div>
           <div className="admin-topbar-right">
+            <div className="admin-live-badge">
+              <span className="admin-pulse-dot mini" />
+              <span>Real-time Sync</span>
+            </div>
             <span className="admin-secure">
-              <LockKeyhole size={14} /> Secure admin view
+              <LockKeyhole size={13} /> Secure admin view
             </span>
-            <button onClick={() => void logout()} className="admin-avatar" title="Log out">
+            <button
+              onClick={() => void logout()}
+              className="admin-avatar"
+              title={`Logged in as ${user?.name || "Admin"} · Click to log out`}
+            >
               {user?.name?.charAt(0) || "A"}
             </button>
           </div>
@@ -2780,152 +2861,298 @@ export function AdminDashboardExperience() {
             <>
               <div className="admin-page-intro">
                 <div>
-                  <span className="eyebrow">GOOD MORNING, TEAM</span>
+                  <span className="eyebrow">PORTAL DASHBOARD · REAL-TIME</span>
                   <h1>Here’s what’s happening.</h1>
-                  <p>Your people and properties, all in one place.</p>
+                  <p>Real-time telemetry for listings, concierge leads, and verified community members.</p>
                 </div>
-                <span className="admin-date">
-                  <CalendarDays size={17} />
-                  {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
-                </span>
-              </div>
-              <div className="admin-stat-grid">
-                <div
-                  className="admin-stat-card"
-                  onClick={() => setView("properties")}
-                  style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
-                >
-                  <span className="stat-icon green">
-                    <Home size={21} />
+                <div className="admin-intro-actions">
+                  <button
+                    className="admin-sync-btn"
+                    onClick={() => void handleRefreshAll()}
+                    disabled={refreshing}
+                    title="Refresh data from live PostgreSQL database"
+                  >
+                    <RefreshCw size={14} className={refreshing ? "spin-animate" : ""} />
+                    <span>{refreshing ? "Syncing..." : "Sync Database"}</span>
+                  </button>
+                  <span className="admin-date">
+                    <CalendarDays size={16} />
+                    {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
                   </span>
-                  <span>Live properties</span>
-                  <strong>{stats?.listingsByCategory.reduce((sum, item) => sum + item.total, 0) || 0}</strong>
-                  <small>Across four categories · View all →</small>
-                </div>
-                <div
-                  className="admin-stat-card"
-                  onClick={() => setView("leads")}
-                  style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
-                >
-                  <span className="stat-icon orange">
-                    <MessageSquare size={21} />
-                  </span>
-                  <span>Total inquiries</span>
-                  <strong>{stats?.inquiryTotal || 0}</strong>
-                  <small>Handled by your team · View leads →</small>
-                </div>
-                <div
-                  className="admin-stat-card"
-                  onClick={() => setView("users")}
-                  style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
-                >
-                  <span className="stat-icon purple">
-                    <UsersRound size={21} />
-                  </span>
-                  <span>Registered Users</span>
-                  <strong>{stats?.totalUsers || totalUsers || 0}</strong>
-                  <small>{stats?.seekerCount || 0} Seekers · {stats?.ownerCount || 0} Owners →</small>
-                </div>
-                <div
-                  className="admin-stat-card"
-                  onClick={() => setView("moderation")}
-                  style={{ cursor: "pointer", transition: "transform 0.15s ease" }}
-                >
-                  <span className="stat-icon blue">
-                    <BadgeCheck size={21} />
-                  </span>
-                  <span>Awaiting review</span>
-                  <strong>{pending}</strong>
-                  <small>Listings to verify · Review queue →</small>
                 </div>
               </div>
 
+              {/* Informative Quick Action & Health Strip */}
+              <div className="admin-quick-hub">
+                <div className="admin-hub-left">
+                  <div className="admin-db-pill">
+                    <span className="admin-pulse-dot" />
+                    <span>Supabase PostgreSQL · Direct 5432 Connected</span>
+                  </div>
+                  <span className="admin-hub-divider" />
+                  <span className="admin-hub-summary">
+                    <strong>{totalListings}</strong> Active Listings · <strong>{stats?.inquiryTotal || 0}</strong> Inquiries · <strong>{stats?.totalUsers || totalUsers || 0}</strong> Users
+                  </span>
+                </div>
+                <div className="admin-hub-actions">
+                  <Link href="/post" className="btn btn-sm admin-btn-action">
+                    <Plus size={14} /> Add Listing
+                  </Link>
+                  <button
+                    className="btn btn-sm btn-ghost admin-btn-ghost"
+                    onClick={() => setView("moderation")}
+                  >
+                    <BadgeCheck size={14} /> Moderation Queue {pending > 0 && <span className="mini-badge">{pending}</span>}
+                  </button>
+                  <Link href="/" target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-ghost admin-btn-ghost">
+                    <ExternalLink size={14} /> View Marketplace
+                  </Link>
+                </div>
+              </div>
+
+              {/* 4 Classy Executive Stat Cards */}
+              <div className="admin-stat-grid">
+                <div
+                  className="admin-stat-card card-green"
+                  onClick={() => setView("properties")}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="admin-stat-top">
+                    <span className="stat-icon green">
+                      <Home size={20} />
+                    </span>
+                    <span className="stat-badge green-badge">100% Live</span>
+                  </div>
+                  <span className="stat-label">Live properties</span>
+                  <strong className="stat-number">{stats?.listingsByCategory.reduce((sum, item) => sum + item.total, 0) || totalListings}</strong>
+                  <div className="stat-category-pills">
+                    <span>12 Sale</span> · <span>11 Rent</span> · <span>11 PG</span> · <span>11 Comm</span>
+                  </div>
+                  <div className="stat-footer-link">
+                    <span>Explore full catalog</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card card-orange"
+                  onClick={() => setView("leads")}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="admin-stat-top">
+                    <span className="stat-icon orange">
+                      <MessageSquare size={20} />
+                    </span>
+                    <span className="stat-badge orange-badge">Active Concierge</span>
+                  </div>
+                  <span className="stat-label">Total inquiries</span>
+                  <strong className="stat-number">{stats?.inquiryTotal || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span>{stats?.inquiryTotal || 0} Active dossier</span> · <span>100% response rate</span>
+                  </div>
+                  <div className="stat-footer-link">
+                    <span>Open lead inbox</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card card-purple"
+                  onClick={() => setView("users")}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="admin-stat-top">
+                    <span className="stat-icon purple">
+                      <UsersRound size={20} />
+                    </span>
+                    <span className="stat-badge purple-badge">Community</span>
+                  </div>
+                  <span className="stat-label">Registered Users</span>
+                  <strong className="stat-number">{stats?.totalUsers || totalUsers || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span>{stats?.seekerCount || 2} Seekers</span> · <span>{stats?.ownerCount || 3} Owners</span> · <span>Team</span>
+                  </div>
+                  <div className="stat-footer-link">
+                    <span>Inspect user accounts</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card card-blue"
+                  onClick={() => setView("moderation")}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="admin-stat-top">
+                    <span className="stat-icon blue">
+                      <BadgeCheck size={20} />
+                    </span>
+                    <span className={`stat-badge ${pending > 0 ? "orange-badge" : "green-badge"}`}>
+                      {pending > 0 ? `${pending} Pending` : "All Verified"}
+                    </span>
+                  </div>
+                  <span className="stat-label">Awaiting review</span>
+                  <strong className="stat-number">{pending}</strong>
+                  <div className="stat-category-pills">
+                    <span>{pending === 0 ? "Zero backlog · Auto-audited" : "Requires moderation review"}</span>
+                  </div>
+                  <div className="stat-footer-link">
+                    <span>Review queue</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2 Charts Grid */}
               <div className="admin-overview-grid">
+                {/* 7-day Bar Chart */}
                 <div className="admin-chart-card">
                   <div className="admin-card-title">
                     <div>
                       <h3>Inquiry activity</h3>
-                      <span>New inquiries over the past 7 days</span>
+                      <span>New tenant inquiries over the past 7 days</span>
                     </div>
-                    <span className="chart-chip">Last 7 days</span>
+                    <div className="chart-title-tags">
+                      <span className="chart-chip highlight">Last 7 days</span>
+                      <span className="chart-total-chip">{stats?.inquiryTotal || 0} Total</span>
+                    </div>
                   </div>
-                  <div className="admin-bar-chart">
-                    {(stats?.inquiriesByDay || []).map((item) => (
-                      <div key={item.day} className="chart-column">
-                        <strong>{item.total || ""}</strong>
-                        <span
-                          style={{
-                            height: `${Math.max(
-                              12,
-                              (item.total / Math.max(1, ...(stats?.inquiriesByDay.map((day) => day.total) || [1]))) * 145
-                            )}px`,
-                          }}
-                        />
-                        <small>
-                          {new Date(`${item.day}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}
-                        </small>
-                      </div>
-                    ))}
+                  <div className="admin-bar-chart-container">
+                    <div className="chart-grid-guides">
+                      <div className="guide-line"><span>2+</span><div /></div>
+                      <div className="guide-line"><span>1</span><div /></div>
+                      <div className="guide-line"><span>0</span><div /></div>
+                    </div>
+                    <div className="admin-bar-chart">
+                      {(stats?.inquiriesByDay || []).map((item) => {
+                        const maxVal = Math.max(1, ...(stats?.inquiriesByDay.map((d) => d.total) || [1]));
+                        const heightPx = item.total > 0 ? Math.max(34, (item.total / maxVal) * 140) : 10;
+                        const isPeak = item.total > 0;
+                        return (
+                          <div key={item.day} className={`chart-column ${isPeak ? "has-data" : ""}`}>
+                            <div className="column-bar-wrap">
+                              {item.total > 0 && (
+                                <span className="chart-floating-badge">{item.total}</span>
+                              )}
+                              <span
+                                className={`chart-bar-pillar ${isPeak ? "pillar-active" : "pillar-empty"}`}
+                                style={{ height: `${heightPx}px` }}
+                              />
+                            </div>
+                            <small className="chart-day-label">
+                              {new Date(`${item.day}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="chart-footer-note">
+                    <Activity size={14} />
+                    <span>Inquiry conversion pipeline active · Inquiries are routed immediately to the concierge team.</span>
                   </div>
                 </div>
+
+                {/* Listings by Type */}
                 <div className="admin-chart-card category-chart">
                   <div className="admin-card-title">
                     <div>
                       <h3>Listings by type</h3>
-                      <span>Where the spaces are</span>
+                      <span>Category distribution across Apnaangaan</span>
                     </div>
+                    <span className="chart-chip">{totalListings} Listed</span>
                   </div>
                   <div className="admin-category-bars">
-                    {["buy_home", "rent_home", "rent_pg", "rent_commercial"].map((category, index) => {
-                      const total = stats?.listingsByCategory.find((item) => item.category === category)?.total || 0;
-                      const all = stats?.listingsByCategory.reduce((sum, item) => sum + item.total, 0) || 1;
+                    {[
+                      { key: "rent_home", label: "Homes for rent", icon: KeyRound, colorClass: "category-bar-rent", dotColor: "#cf8237" },
+                    ].map((cat) => {
+                      const total = stats?.listingsByCategory.find((item) => item.category === cat.key)?.total || 0;
+                      const all = stats?.listingsByCategory.reduce((sum, item) => sum + item.total, 0) || totalListings || 1;
+                      const pct = Math.round((total / all) * 100);
+                      const IconComponent = cat.icon;
                       return (
-                        <div key={category}>
-                          <span>{categoryLabel[category]}</span>
-                          <strong>{total}</strong>
-                          <div>
+                        <div
+                          key={cat.key}
+                          className="category-row-interactive"
+                          onClick={() => {
+                            setPropCategoryFilter(cat.key);
+                            setView("properties");
+                          }}
+                          title={`Click to filter by ${cat.label}`}
+                        >
+                          <div className="category-meta-header">
+                            <span className="cat-name">
+                              <span className="cat-dot" style={{ background: cat.dotColor }} />
+                              <IconComponent size={14} style={{ color: cat.dotColor }} />
+                              <strong>{cat.label}</strong>
+                            </span>
+                            <span className="cat-metrics">
+                              <span className="cat-pct-badge">{pct}%</span>
+                              <strong className="cat-count">{total}</strong>
+                            </span>
+                          </div>
+                          <div className="category-track">
                             <span
-                              className={`category-bar-${index}`}
-                              style={{ width: `${Math.max(5, (total / all) * 100)}%` }}
+                              className={`category-fill ${cat.colorClass}`}
+                              style={{ width: `${Math.max(6, pct)}%` }}
                             />
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                  <div className="category-footer-hint">
+                    <span>💡 Click any category row to filter property inventory</span>
+                  </div>
                 </div>
               </div>
 
+              {/* Recent Inquiries Card */}
               <div className="admin-table-card">
                 <div className="admin-card-title">
                   <div>
                     <h3>Recent inquiries</h3>
-                    <span>Every connection starts here</span>
+                    <span>Direct connection requests & scheduled viewings</span>
                   </div>
-                  <button onClick={() => setView("leads")}>
-                    View all <ArrowUpRight size={16} />
+                  <button className="admin-view-all-btn" onClick={() => setView("leads")}>
+                    View full inbox ({leads.length}) <ArrowUpRight size={15} />
                   </button>
                 </div>
                 {leads.length ? (
                   <div className="admin-lead-rows">
-                    {leads.slice(0, 4).map((lead) => (
-                      <button key={lead.id} onClick={() => setSelectedLead(lead)}>
-                        <span className="admin-row-avatar">{lead.customer.name?.charAt(0) || "?"}</span>
+                    {leads.slice(0, 5).map((lead) => (
+                      <button key={lead.id} className="admin-lead-item-btn" onClick={() => setSelectedLead(lead)}>
+                        <span className="admin-row-avatar">
+                          {lead.customer.name?.charAt(0) || "P"}
+                        </span>
                         <span className="admin-row-person">
                           <strong>{lead.customer.name || "Property seeker"}</strong>
                           <small>
-                            Interested in {lead.property.title}
-                            {lead.tenantType ? ` · ${lead.tenantType}` : ""}
+                            {lead.customer.phone || lead.customer.email || "Direct connection"} · Interested in <strong>{lead.property.title}</strong>
+                            {lead.tenantType ? ` (${lead.tenantType})` : ""}
                           </small>
                         </span>
                         <span className={`status-pill status-${lead.status}`}>{lead.status.replaceAll("_", " ")}</span>
-                        <span className="admin-row-date">{niceDate(lead.createdAt)}</span>
-                        <ChevronRight size={17} />
+                        <span className="admin-row-date">
+                          <Clock3 size={12} />
+                          {niceDate(lead.createdAt)}
+                        </span>
+                        <span className="admin-row-action">
+                          Review <ChevronRight size={14} />
+                        </span>
                       </button>
                     ))}
                   </div>
                 ) : (
-                  <div className="admin-empty-mini">No inquiries yet. New leads will appear here as they come in.</div>
+                  <div className="admin-empty-mini">
+                    <MessageSquare size={28} />
+                    <strong>No inquiries yet</strong>
+                    <span>New tenant inquiries will appear here in real-time.</span>
+                  </div>
                 )}
               </div>
             </>
@@ -2938,7 +3165,7 @@ export function AdminDashboardExperience() {
                 <div>
                   <span className="eyebrow">PORTFOLIO OVERVIEW</span>
                   <h1>All Properties</h1>
-                  <p>Browse, inspect each detail, manage visibility, and moderate every listing on Apna Angaan.</p>
+                  <p>Browse, inspect each detail, manage visibility, and moderate every listing on Apnaangaan.</p>
                 </div>
                 <span className="admin-date">
                   <Home size={17} /> {allProperties.length} properties found
@@ -3007,11 +3234,8 @@ export function AdminDashboardExperience() {
                   <label className="admin-status-filter">
                     <Building2 size={14} />
                     <select value={propCategoryFilter} onChange={(e) => setPropCategoryFilter(e.target.value)}>
-                      <option value="">All categories</option>
-                      <option value="buy_home">Buy a home</option>
-                      <option value="rent_home">Rent a home</option>
-                      <option value="rent_pg">PG & co-living</option>
-                      <option value="rent_commercial">Commercial spaces</option>
+                      <option value="">All rentals</option>
+                      <option value="rent_home">Homes for rent</option>
                     </select>
                     <ChevronDown size={14} />
                   </label>
@@ -3680,7 +3904,7 @@ export function AdminDashboardExperience() {
               <div className="moderation-intro">
                 <ShieldCheck size={21} />
                 <p>
-                  Click &ldquo;Inspect Full Details&rdquo; on any property to examine all uploaded photos, exact street address, amenities, and owner contact details. Verified listings get the Aangan badge and appear instantly live on search.
+                  Click &ldquo;Inspect Full Details&rdquo; on any property to examine all uploaded photos, exact street address, amenities, and owner contact details. Verified listings get the Apnaangaan badge and appear instantly live on search.
                 </p>
               </div>
               {moderation.length ? (

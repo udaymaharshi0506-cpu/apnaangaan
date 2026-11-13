@@ -8,5 +8,6 @@ export const metadata: Metadata = { title: "Team sign in", robots: { index: fals
 export default async function AdminLoginPage() {
   const user = await getServerUser();
   if (hasRole(user, "admin")) redirect("/admin");
+  if (user) redirect("/");
   return <AdminLoginExperience/>;
 }

@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bath, BedDouble, CalendarDays, CarFront, Check, ChevronLeft, ChevronRight, Clock3, Copy, Heart, Home, Image as ImageIcon, KeyRound, LockKeyhole, MapPin, Maximize2, ShieldCheck, Sparkles, Trees, UtensilsCrossed, WashingMachine, Wifi, X, Zap, Building2, Wind, Users, Briefcase, Calendar, Phone, CheckCircle2, AlertCircle, MessageSquareQuote, Compass, Layers, BadgeIndianRupee, type LucideIcon } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { categoryLabel, formatPrice } from "@/lib/format";
+import { detectContactInfo } from "@/lib/contact-filter";
+import { extractIndianPhoneDigits, normalizeWhitespace, parseIndianPhone } from "@/lib/input-validation";
 import type { PublicProperty } from "@/lib/serializers";
 
 function getFormalNarrative(prop: PublicProperty): string {
@@ -45,10 +47,9 @@ function getFormalNarrative(prop: PublicProperty): string {
 
 const amenityIcons: Record<string, LucideIcon> = { "Covered Parking": CarFront, "Private Garden": Trees, "Park Nearby": Trees, "Security": ShieldCheck, "Power Backup": Zap, "Wi-Fi": Wifi, "Meals Included": UtensilsCrossed, "Laundry": WashingMachine, "Housekeeping": Sparkles, "Lift": Building2, "Balcony": Wind, "Water Supply": Home, "Modular Kitchen": Home, "Meeting Room": Building2 };
 
-const occupantsOptions = ["1 Person", "2 People", "3–4 People", "5+ People"];
+const occupantsOptions = ["1", "2", "3-4", "5+"];
 const tenantTypeOptions = ["Family", "Working Professionals", "Bachelors", "Couple", "Students"];
-const professionOptions = ["Job / Salaried", "Business / Self-Employed", "Student", "Freelancer / Remote", "Other"];
-const groupGenderOptions = ["Family", "Girls / All Female", "Boys / All Male", "Both / Co-ed"];
+const professionOptions = ["Job-Salaried", "Business-Self-Employed", "Student", "Freelancer-Remote", "Other"];
 const moveInTimelineOptions = ["Immediately", "Within 15 Days", "Within 30 Days", "Exploring / Flexible"];
 const contactOptions = ["Anytime is fine", "Morning (9 AM–12 PM)", "Afternoon (12–5 PM)", "Evening (5–8 PM)"];
 
@@ -59,20 +60,35 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
   const [mobilePhotoIndex, setMobilePhotoIndex] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
   
-  // Enhanced homeseeker inquiry state
+  // Enhanced homeseeker inquiry state (No pre-selected defaults)
   const [interestOpen, setInterestOpen] = useState(false);
   const [interestStep, setInterestStep] = useState<1 | 2>(1);
-  const [occupantsCount, setOccupantsCount] = useState(occupantsOptions[0]);
-  const [tenantType, setTenantType] = useState(tenantTypeOptions[0]);
-  const [profession, setProfession] = useState(professionOptions[0]);
-  const [groupGender, setGroupGender] = useState(groupGenderOptions[0]);
+  const [occupantsCount, setOccupantsCount] = useState<string>("");
+  const [tenantType, setTenantType] = useState<string>("");
+  const [profession, setProfession] = useState<string>("");
   const [moveInTimeline, setMoveInTimeline] = useState(moveInTimelineOptions[0]);
   const [confirmedPhone, setConfirmedPhone] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [contactTime, setContactTime] = useState(contactOptions[0]);
   const [seekerNotes, setSeekerNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const submitLockRef = useRef(false);
   const [submitted, setSubmitted] = useState(false);
+  const notesViolation = detectContactInfo(seekerNotes);
+
+  function getConsistencyError(): string | null {
+    if (occupantsCount === "1" && tenantType === "Family") {
+      return "A family cannot consist of 1 person. Please select 'Bachelors', 'Working Professionals', or 'Students', or increase occupant count.";
+    }
+    if (occupantsCount === "1" && tenantType === "Couple") {
+      return "A couple consists of 2 people. Please select '2' occupants or choose another tenant type.";
+    }
+    if (tenantType === "Students" && (profession === "Job-Salaried" || profession === "Business-Self-Employed")) {
+      return "Tenant type 'Students' is incompatible with salaried or business employment. Please select 'Student' profession or choose 'Working Professionals'.";
+    }
+    return null;
+  }
   
   const saved = savedIds.has(property.id);
   useEffect(() => {
@@ -90,12 +106,18 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
     setConfirmedPhone(rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits);
     setPhoneError("");
     setInterestStep(1);
+    // Explicitly reset choices so seeker must actively choose each option (no pre-selected defaults)
+    setOccupantsCount("");
+    setTenantType("");
+    setProfession("");
+    setSubmitError("");
     setSubmitted(false);
     setInterestOpen(true);
   }
   function handlePhoneChange(val: string) {
-    const digits = val.replace(/\D/g, "").slice(0, 10);
+    const digits = extractIndianPhoneDigits(val);
     setConfirmedPhone(digits);
+    setSubmitError("");
     if (digits.length === 0) {
       setPhoneError("Phone number is required");
     } else if (!/^[6-9]/.test(digits)) {
@@ -107,14 +129,30 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
     }
   }
   async function submitInterest() {
-    if (!/^[6-9]\d{9}$/.test(confirmedPhone)) {
-      setPhoneError("Please enter a valid 10-digit Indian mobile number");
-      toast("Please enter a valid 10-digit mobile number", "error");
+    if (submitting || submitLockRef.current) return;
+    setSubmitError("");
+    const phoneCheck = parseIndianPhone(confirmedPhone);
+    if (!phoneCheck.valid) {
+      setPhoneError(phoneCheck.error);
+      toast(phoneCheck.error, "error");
       return;
     }
+    const consistencyErr = getConsistencyError();
+    if (consistencyErr) {
+      setSubmitError(consistencyErr);
+      toast(consistencyErr, "error");
+      return;
+    }
+    if (notesViolation.blocked) {
+      setSubmitError(notesViolation.reason);
+      toast(notesViolation.reason, "error");
+      return;
+    }
+    const cleanNotes = normalizeWhitespace(seekerNotes);
+    submitLockRef.current = true;
     setSubmitting(true);
     try {
-      await apiFetch("/api/leads", {
+      const data = await apiFetch<{ duplicate?: boolean; message?: string }>("/api/leads", {
         method: "POST",
         body: JSON.stringify({
           propertyId: property.id,
@@ -122,16 +160,23 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
           occupantsCount,
           tenantType,
           profession,
-          groupGender,
+          groupGender: "N/A",
           moveInTimeline,
-          confirmedPhone,
-          seekerNotes: seekerNotes.trim() || undefined,
+          confirmedPhone: phoneCheck.e164,
+          seekerNotes: cleanNotes || undefined,
         }),
       });
       setSubmitted(true);
-      toast("Your interest has been confirmed");
-    } catch (error) { toast(error instanceof Error ? error.message : "Couldn't send your interest", "error"); }
-    finally { setSubmitting(false); }
+      toast(data.duplicate ? (data.message || "You have already expressed interest in this property.") : "Your interest has been confirmed");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Network connection dropped. Please check your internet and tap Retry.";
+      setSubmitError(msg);
+      toast(msg, "error");
+    }
+    finally {
+      submitLockRef.current = false;
+      setSubmitting(false);
+    }
   }
   async function share() {
     const url = window.location.href;
@@ -140,7 +185,7 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
   }
   const photos = property.images && property.images.length > 0 ? property.images : ["https://images.pexels.com/photos/7031732/pexels-photo-7031732.jpeg?auto=compress&cs=tinysrgb&w=1200"];
   return <main className="detail-page"><div className="container detail-container">
-    <div className="breadcrumbs detail-breadcrumbs"><Link href="/">Home</Link><span>/</span><Link href={`/search?category=${property.category}`}>{categoryLabel[property.category]}</Link><span>/</span><span>{property.title}</span></div>
+    <div className="breadcrumbs detail-breadcrumbs"><Link href="/">Home</Link><span>/</span><Link href="/search">Homes for rent</Link><span>/</span><span>{property.title}</span></div>
     
     {/* Mobile swipeable image gallery with native overlay controls */}
     <div className="mobile-gallery-wrap">
@@ -182,8 +227,8 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
     <div className="detail-heading">
       <div>
         <div className="detail-tags">
-          <span className="detail-category">{property.propertyType} · {property.category === "buy_home" ? "For sale" : "For rent"}</span>
-          {property.verified && <span className="detail-verified"><BadgeCheck size={15} fill="currentColor" stroke="var(--surface)"/> Aangan verified</span>}
+          <span className="detail-category">{property.propertyType} · For rent</span>
+          {property.verified && <span className="detail-verified"><BadgeCheck size={15} fill="currentColor" stroke="var(--surface)"/> Apnaangaan verified</span>}
           {isOwner && <span className="detail-verified" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}><KeyRound size={15}/> Your listing</span>}
           {isAdmin && <span className="detail-verified" style={{ background: "var(--surface-muted)" }}><ShieldCheck size={15}/> Admin view</span>}
         </div>
@@ -212,9 +257,9 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
       <section className="detail-overview detail-section">
         <div className="detail-price-row">
           <div>
-            <span className="detail-small-label">{property.category === "buy_home" ? "ASKING PRICE" : "MONTHLY RENT"}</span>
-            <strong>{formatPrice(property.price, property.category)}</strong>
-            <small>{property.priceType === "negotiable" ? "Price negotiable" : property.category === "buy_home" ? "All-inclusive asking price" : property.deposit ? `Deposit: ₹${property.deposit.toLocaleString("en-IN")}` : "Available to rent"}</small>
+            <span className="detail-small-label">MONTHLY RENT</span>
+            <strong>{formatPrice(property.price, "rent_home")}</strong>
+            <small>{property.priceType === "negotiable" ? "Price negotiable" : property.deposit ? `Deposit: ${formatPrice(property.deposit, "rent_home", { period: "total" })}` : "Available to rent"}</small>
           </div>
           {property.verified && <span className="overview-verified"><BadgeCheck size={18}/> Verified listing</span>}
         </div>
@@ -317,13 +362,13 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
               <div className="formal-box-icon"><BadgeIndianRupee size={18}/></div>
               <div>
                 <h3>Financial &amp; Pricing Terms</h3>
-                <p>Commercial conditions, security deposit, and lease terms</p>
+                <p>Rent terms, security deposit, and lease conditions</p>
               </div>
             </div>
             <div className="formal-box-grid">
               <div className="formal-tile">
-                <span className="formal-tile-label">{property.category === "buy_home" ? "Asking Price" : "Monthly Rent"}</span>
-                <strong className="formal-tile-value">{formatPrice(property.price, property.category)}</strong>
+                <span className="formal-tile-label">Monthly Rent</span>
+                <strong className="formal-tile-value">{formatPrice(property.price, "rent_home")}</strong>
               </div>
               <div className="formal-tile">
                 <span className="formal-tile-label">Price Condition</span>
@@ -331,15 +376,15 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
               </div>
               <div className="formal-tile">
                 <span className="formal-tile-label">Security Deposit</span>
-                <strong className="formal-tile-value">{property.deposit ? `₹${property.deposit.toLocaleString("en-IN")}` : property.category === "buy_home" ? "Full payment" : "Standard 1–2 months"}</strong>
+                <strong className="formal-tile-value">{property.deposit ? formatPrice(property.deposit, "rent_home", { period: "total" }) : "Standard 1–2 months"}</strong>
               </div>
               <div className="formal-tile">
                 <span className="formal-tile-label">Maintenance Charges</span>
-                <strong className="formal-tile-value">{property.maintenanceStatus === "included" ? "Included in Rent" : property.maintenanceAmount ? `₹${property.maintenanceAmount.toLocaleString("en-IN")}/month` : "As per society rules"}</strong>
+                <strong className="formal-tile-value">{property.maintenanceStatus === "included" ? "Included in Rent" : property.maintenanceAmount ? formatPrice(property.maintenanceAmount, "rent_home") : "As per society rules"}</strong>
               </div>
               <div className="formal-tile">
-                <span className="formal-tile-label">Possession / Availability</span>
-                <strong className="formal-tile-value">{property.availabilityDate ? new Date(property.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : property.possessionStatus || "Ready to move"}</strong>
+                <span className="formal-tile-label">Availability</span>
+                <strong className="formal-tile-value">{property.availabilityDate ? new Date(property.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "Ready to move"}</strong>
               </div>
               <div className="formal-tile">
                 <span className="formal-tile-label">Preferred Tenants</span>
@@ -397,9 +442,9 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
       </section>
       <section className="detail-section"><div className="detail-section-title"><span className="eyebrow"><span className="eyebrow-line"/> THOUGHTFUL EXTRAS</span><h2>Amenities &amp; essentials</h2></div><div className="amenities-grid">{property.amenities.map((amenity) => { const Icon = amenityIcons[amenity] || Check; return <div className="amenity-item" key={amenity}><span><Icon size={22} strokeWidth={1.65}/></span><strong>{amenity}</strong></div>; })}</div></section>
     </div><aside className="detail-sidebar">{isOwner ? <div className="detail-interest-card"><span className="side-eyebrow"><KeyRound size={15}/> Your Property Listing</span><h3>You are the owner of this space.</h3><p>Manage your listing, view prospective seeker inquiries, and check viewing schedules in your dashboard.</p><Link href="/owner" className="btn btn-primary btn-full">Manage in Owner Dashboard <ArrowRight size={18}/></Link><div className="interest-perks"><span><BadgeCheck size={17}/> Direct owner controls</span><span><ShieldCheck size={17}/> Private introductions</span></div></div> : isAdmin ? <div className="detail-interest-card"><span className="side-eyebrow"><ShieldCheck size={15}/> Admin Workspace</span><h3>Platform moderation view.</h3><p>Manage listing status, verification badges, and mediator contacts in the team portal.</p><Link href="/admin" className="btn btn-primary btn-full">Open Admin Portal <ArrowRight size={18}/></Link></div> : <div className="detail-interest-card"><span className="side-eyebrow"><Sparkles size={15}/> A better way to connect</span><h3>Could this be<br/>your next place?</h3><p>Let us know you’re interested. We’ll personally help arrange the next step.</p><button className="btn btn-primary btn-full" onClick={openInterest}>Express interest <ArrowRight size={18}/></button><div className="interest-safe"><LockKeyhole size={16}/><span>Your number is never shared with the owner.</span></div><div className="interest-divider"/><div className="interest-perks"><span><BadgeCheck size={17}/> Verified property details</span><span><Heart size={17}/> No spam or lead reselling</span><span><CalendarDays size={17}/> Viewings coordinated by our team</span></div></div>}<div className="side-help"><span className="side-help-icon"><ShieldCheck size={23}/></span><div><strong>Here to help you move.</strong><span>We handle the connection, so you can focus on finding your fit.</span></div></div></aside></div>
-    {similar.length > 0 && <section className="similar-section"><div className="section-heading-row"><div><span className="eyebrow"><span className="eyebrow-line"/> KEEP EXPLORING</span><h2>You might also <em>love these.</em></h2><p>More spaces with something special.</p></div><Link href={`/search?category=${property.category}`} className="text-link desktop-only">View similar spaces <ArrowUpRight size={17}/></Link></div><div className="property-grid">{similar.map((item) => <PropertyCard key={item.id} property={item}/>)}</div></section>}
+    {similar.length > 0 && <section className="similar-section"><div className="section-heading-row"><div><span className="eyebrow"><span className="eyebrow-line"/> KEEP EXPLORING</span><h2>You might also <em>love these.</em></h2><p>More rental spaces with something special.</p></div><Link href="/search" className="text-link desktop-only">View more rental spaces <ArrowUpRight size={17}/></Link></div><div className="property-grid">{similar.map((item) => <PropertyCard key={item.id} property={item}/>)}</div></section>}
   </div>
-  <div className="detail-mobile-bar"><div><small>{property.category === "buy_home" ? "Asking price" : "Monthly rent"}</small><strong>{formatPrice(property.price, property.category)}</strong></div>{isOwner ? <Link className="btn btn-primary" href="/owner">Manage listing <ArrowRight size={17}/></Link> : isAdmin ? <Link className="btn btn-primary" href="/admin">Admin Workspace <ArrowRight size={17}/></Link> : <button className="btn btn-primary" onClick={openInterest}>Express interest <ArrowRight size={17}/></button>}</div>
+  <div className="detail-mobile-bar"><div><small>Monthly rent</small><strong>{formatPrice(property.price, "rent_home")}</strong></div>{isOwner ? <Link className="btn btn-primary" href="/owner">Manage listing <ArrowRight size={17}/></Link> : isAdmin ? <Link className="btn btn-primary" href="/admin">Admin Workspace <ArrowRight size={17}/></Link> : <button className="btn btn-primary" onClick={openInterest}>Express interest <ArrowRight size={17}/></button>}</div>
   {galleryOpen && <div className="gallery-lightbox" role="dialog" aria-modal="true" aria-label="Property photos"><div className="lightbox-top"><span>{property.title} <small>· {photoIndex + 1} of {photos.length}</small></span><button onClick={() => setGalleryOpen(false)} aria-label="Close gallery"><X size={25}/></button></div><div className="lightbox-stage"><button onClick={() => setPhotoIndex((photoIndex - 1 + photos.length) % photos.length)} aria-label="Previous photo"><ChevronLeft size={26}/></button><img src={photos[photoIndex]} alt={`${property.title} photo ${photoIndex + 1}`}/><button onClick={() => setPhotoIndex((photoIndex + 1) % photos.length)} aria-label="Next photo"><ChevronRight size={26}/></button></div><div className="lightbox-thumbs">{photos.map((photo, index) => <button key={index} className={index === photoIndex ? "active" : ""} onClick={() => setPhotoIndex(index)}><img src={photo} alt={`Thumbnail ${index + 1}`}/></button>)}</div></div>}
   {interestOpen && (
     <div className="modal-backdrop" onClick={() => setInterestOpen(false)}>
@@ -422,8 +467,8 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                 <strong>{tenantType} · {occupantsCount}</strong>
               </div>
               <div className="inquiry-summary-row">
-                <span>Profession &amp; Group</span>
-                <strong>{profession} · {groupGender}</strong>
+                <span>Profession</span>
+                <strong>{profession}</strong>
               </div>
               <div className="inquiry-summary-row">
                 <span>Move-in Timeline</span>
@@ -496,7 +541,6 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                         className={`inquiry-chip ${tenantType === opt ? "selected" : ""}`}
                         onClick={() => {
                           setTenantType(opt);
-                          if (opt === "Family") setGroupGender("Family");
                         }}
                       >
                         <span className="inquiry-chip-radio"/>
@@ -526,30 +570,19 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                   </div>
                 </div>
 
-                {/* 4. Gender / Group Composition */}
-                <div className="inquiry-question-block">
-                  <span className="inquiry-question-label">
-                    <Users size={16}/> Group composition / Gender
-                  </span>
-                  <div className="inquiry-chips-grid">
-                    {groupGenderOptions.map((opt) => (
-                      <button
-                        type="button"
-                        key={opt}
-                        className={`inquiry-chip ${groupGender === opt ? "selected" : ""}`}
-                        onClick={() => setGroupGender(opt)}
-                      >
-                        <span className="inquiry-chip-radio"/>
-                        <span>{opt}</span>
-                      </button>
-                    ))}
+                {/* Consistency Warning / Block */}
+                {getConsistencyError() && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", padding: "11px 14px", borderRadius: "8px", fontSize: "12px", marginTop: "14px", lineHeight: "1.45" }}>
+                    <AlertCircle size={16} style={{ flexShrink: 0, marginTop: "2px" }}/>
+                    <span>{getConsistencyError()}</span>
                   </div>
-                </div>
+                )}
 
                 <div className="inquiry-nav-row">
                   <button
                     type="button"
                     className="btn btn-primary btn-full"
+                    disabled={!occupantsCount || !tenantType || !profession || !!getConsistencyError()}
                     onClick={() => setInterestStep(2)}
                   >
                     Continue to Contact &amp; Schedule <ArrowRight size={17}/>
@@ -649,7 +682,27 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                     onChange={(e) => setSeekerNotes(e.target.value)}
                     placeholder="e.g. Need dedicated car parking, vegetarian family, have a small dog, looking for 11-month lease..."
                   />
+                  {notesViolation.blocked && (
+                    <small style={{ display: "block", color: "#b91c1c", fontWeight: 600, marginTop: "6px" }}>
+                      {notesViolation.reason}
+                    </small>
+                  )}
                 </div>
+
+                {/* Consent line before submit */}
+                <div style={{ display: "flex", alignItems: "center", gap: "9px", background: "var(--brand-pale, #edf7f4)", color: "var(--brand-deep, #144b44)", padding: "12px 14px", borderRadius: "10px", fontSize: "12px", lineHeight: "1.45", margin: "14px 0 18px", border: "1px solid rgba(30,112,102,0.18)" }}>
+                  <ShieldCheck size={18} style={{ flexShrink: 0, color: "var(--brand, #1e7066)" }}/>
+                  <span>Only these details are shared with the owner. Your name and contact stay private.</span>
+                </div>
+
+                {submitError && (
+                  <div className="form-error" role="alert" style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                    <span>{submitError}</span>
+                    <button type="button" className="btn btn-outline" style={{ fontSize: "12px", padding: "5px 10px", height: "auto" }} disabled={submitting} onClick={() => void submitInterest()}>
+                      Retry
+                    </button>
+                  </div>
+                )}
 
                 <div className="inquiry-nav-row">
                   <button
@@ -664,17 +717,17 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                     type="button"
                     className="btn btn-primary"
                     style={{ flex: 1 }}
-                    disabled={submitting}
+                    disabled={submitting || !/^[6-9]\d{9}$/.test(confirmedPhone) || notesViolation.blocked}
                     onClick={() => void submitInterest()}
                   >
-                    {submitting ? "Confirming..." : "Confirm my interest"} <ArrowRight size={17}/>
+                    {submitting ? "Confirming..." : submitError ? "Retry submission" : "Confirm my interest"} <ArrowRight size={17}/>
                   </button>
                 </div>
               </div>
             )}
 
             <p className="modal-privacy">
-              <ShieldCheck size={15}/> Your contact details stay with Aangan. They are never shared directly.
+              <ShieldCheck size={15}/> Your contact details stay with Apnaangaan. They are never shared directly.
             </p>
           </>
         )}

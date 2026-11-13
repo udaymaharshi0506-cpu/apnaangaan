@@ -16,7 +16,7 @@ export function PropertyCard({ property, compact = false }: { property: PublicPr
         <span className="image-count"><Maximize2 size={13}/> {property.images.length} photos</span>
       </div>
       <div className="property-card-body">
-        <div className="property-card-topline"><span className="property-type">{property.propertyType} · {property.category === "buy_home" ? "For sale" : property.category === "rent_pg" ? "PG & Co-living" : "For rent"}</span><ArrowUpRight size={17} className="card-arrow"/></div>
+        <div className="property-card-topline"><span className="property-type">{property.propertyType} · For rent</span><ArrowUpRight size={17} className="card-arrow"/></div>
         <div className="property-price">{formatPrice(property.price, property.category)}</div>
         <h3>{property.title}</h3>
         <p className="property-location"><MapPin size={15} strokeWidth={1.9}/>{property.locality}, {property.city}</p>

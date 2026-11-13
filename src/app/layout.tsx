@@ -8,11 +8,11 @@ import "./workspace.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.apnaangaan.in"),
-  title: { default: "Aangan — Find a place that feels like yours", template: "%s | Aangan" },
-  description: "Find verified homes, rentals, PGs, and commercial spaces in India. No spam calls, no shared contact details — just a better way home.",
-  applicationName: "Aangan",
+  title: { default: "Apnaangaan — Find a place that feels like yours", template: "%s | Apnaangaan" },
+  description: "Find verified homes for rent in India. No spam calls, no shared contact details — just a better way home.",
+  applicationName: "Apnaangaan",
   icons: { icon: "/app-icon.svg", apple: "/app-icon.svg" },
-  keywords: ["verified homes", "property in India", "homes for rent", "buy home", "PG", "commercial rent"],
+  keywords: ["verified homes", "rental homes in India", "homes for rent", "flats for rent", "apartments for rent", "house for rent"],
 };
 export const viewport: Viewport = {
   width: "device-width",

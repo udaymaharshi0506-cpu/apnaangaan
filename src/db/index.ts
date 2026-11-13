@@ -29,9 +29,10 @@ export const pool =
   new Pool({
     connectionString: cleanDatabaseUrl,
     ssl: isHostedPg ? { rejectUnauthorized: false } : undefined,
+    options: "-c search_path=public",
     connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 30000,
-    max: isHostedPg ? 3 : 10,
+    max: isHostedPg ? 5 : 10,
   });
 
 pool.on("error", (err) => {

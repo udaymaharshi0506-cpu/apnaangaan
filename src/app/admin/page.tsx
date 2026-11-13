@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Team workspace", robots: { index: false, follow: false } };
 export default async function AdminPage() {
   const user = await getServerUser();
-  if (!hasRole(user, "admin")) redirect("/admin/login");
+  if (!user) redirect("/admin/login");
+  if (!hasRole(user, "admin")) redirect("/");
   return <AdminDashboardExperience/>;
 }

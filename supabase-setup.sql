@@ -12,8 +12,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE property_status AS ENUM ('pending_review', 'live', 'paused', 'sold', 'rented', 'rejected');
+  CREATE TYPE property_status AS ENUM ('draft', 'pending_review', 'live', 'paused', 'sold', 'rented', 'rejected');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE property_status ADD VALUE IF NOT EXISTS 'draft';
 
 DO $$ BEGIN
   CREATE TYPE lead_status AS ENUM ('new', 'contacted', 'meeting_scheduled', 'closed_won', 'closed_lost');
@@ -24,8 +25,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE meeting_status AS ENUM ('proposed', 'confirmed', 'completed', 'cancelled');
+  CREATE TYPE meeting_status AS ENUM ('proposed', 'confirmed', 'rescheduled', 'completed', 'cancelled');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE meeting_status ADD VALUE IF NOT EXISTS 'rescheduled';
 
 
 -- 2. Tables
@@ -34,7 +36,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TABLE IF NOT EXISTS users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   phone VARCHAR(20) UNIQUE,
-  email VARCHAR(255) UNIQUE,
+  email VARCHAR(255) NOT NULL UNIQUE,
   name VARCHAR(150),
   city VARCHAR(120),
   location VARCHAR(255),
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
   roles JSONB NOT NULL DEFAULT '["customer"]'::jsonb,
   otp_verified_at TIMESTAMPTZ,
   consent_at TIMESTAMPTZ,
+  last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -85,9 +88,38 @@ CREATE TABLE IF NOT EXISTS leads (
   status lead_status NOT NULL DEFAULT 'new',
   admin_notes TEXT,
   preferred_contact_time VARCHAR(100),
+  occupants_count VARCHAR(50),
+  tenant_type VARCHAR(100),
+  profession VARCHAR(100),
+  group_gender VARCHAR(50),
+  move_in_timeline VARCHAR(100),
+  confirmed_phone VARCHAR(20),
+  seeker_notes TEXT,
+  owner_response VARCHAR(50) DEFAULT 'pending',
+  owner_responded_at TIMESTAMPTZ,
+  whatsapp_message_id VARCHAR(100),
+  whatsapp_status VARCHAR(50) DEFAULT 'pending',
+  whatsapp_reminder_sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE OR REPLACE VIEW owner_inquiry_view AS
+SELECT
+  l.id AS id,
+  l.property_id AS property_id,
+  p.title AS property_name,
+  l.owner_id AS owner_id,
+  l.occupants_count AS occupants_count,
+  l.tenant_type AS tenant_type,
+  l.profession AS profession,
+  COALESCE(l.group_gender, 'N/A') AS group_composition,
+  l.status AS status,
+  COALESCE(l.owner_response, 'pending') AS owner_response,
+  l.created_at AS created_at,
+  l.updated_at AS updated_at
+FROM leads l
+JOIN properties p ON l.property_id = p.id;
 
 CREATE TABLE IF NOT EXISTS meetings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,

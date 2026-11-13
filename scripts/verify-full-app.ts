@@ -93,11 +93,12 @@ async function runEndToEndVerification() {
       "properties",
       "POST",
       {
-        category: "buy_home",
+        category: "rent_home",
         propertyType: "Apartment",
         title: "Koramangala Sunlit Haven",
         description: "Elegant 3BHK flat near 5th Block. Peaceful community living.",
-        price: 18500000,
+        price: 48000,
+        deposit: 96000,
         address: "7th Main Road, Koramangala",
         city: "Bengaluru",
         locality: "Koramangala 5th Block",
@@ -124,7 +125,7 @@ async function runEndToEndVerification() {
 
     // 7. Public Listing & PII Shield Verification
     console.log("\n--- TEST 7: Public Property Search & PII Privacy Shield ---");
-    const publicList = await call("properties?limit=5");
+    const publicList = await call("properties?sort=newest");
     assert.equal(publicList.status, 200);
     const publicData = await publicList.json();
     const liveProp = publicData.items.find((p: any) => p.id === propertyId);
@@ -185,7 +186,22 @@ async function runEndToEndVerification() {
     record("Full Test Suite Execution", false, err.message);
   } finally {
     await pool.query(`
-      DELETE FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com');
+      DELETE FROM meetings WHERE lead_id IN (
+        SELECT id FROM leads WHERE customer_id IN (
+          SELECT id FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com')
+        ) OR owner_id IN (
+          SELECT id FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com')
+        )
+      );
+      DELETE FROM leads WHERE customer_id IN (
+        SELECT id FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com')
+      ) OR owner_id IN (
+        SELECT id FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com')
+      );
+      DELETE FROM properties WHERE owner_id IN (
+        SELECT id FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com')
+      );
+      DELETE FROM users WHERE email IN ('seeker@example.com', 'owner@example.com', 'testseeker@example.com', 'testowner@example.com', 'seeker.audit@aangan.com', 'owner.audit@aangan.com');
     `);
     await pool.end();
   }

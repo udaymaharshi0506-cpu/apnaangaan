@@ -1,12 +1,68 @@
 import { db } from "@/db";
-import { properties, type Property } from "@/db/schema";
-import { serializePublicProperty } from "@/lib/serializers";
+import { properties } from "@/db/schema";
+import { expandLocationSearchVariants } from "@/lib/search-utils";
+import { serializePublicProperty, type PublicPropertyInput } from "@/lib/serializers";
 import { and, asc, count, desc, eq, gte, ilike, lte, or, type SQL } from "drizzle-orm";
+
+/** Explicit DB column allowlist for public, customer, and non-sensitive property reads.
+ *  Projects out ownerId, address, ownerName, ownerPhone, liveSelfieUrl, aadhaarCardUrl, coOwners, and rejectionReason at the query layer. */
+export const publicPropertyColumns = {
+  id: properties.id,
+  category: properties.category,
+  propertyType: properties.propertyType,
+  title: properties.title,
+  description: properties.description,
+  price: properties.price,
+  priceType: properties.priceType,
+  city: properties.city,
+  locality: properties.locality,
+  pinCode: properties.pinCode,
+  landmark: properties.landmark,
+  latitude: properties.latitude,
+  longitude: properties.longitude,
+  bhkOrRoomType: properties.bhkOrRoomType,
+  areaSqft: properties.areaSqft,
+  bathrooms: properties.bathrooms,
+  floor: properties.floor,
+  totalFloors: properties.totalFloors,
+  propertyAge: properties.propertyAge,
+  facing: properties.facing,
+  furnishingStatus: properties.furnishingStatus,
+  amenities: properties.amenities,
+  images: properties.images,
+  availabilityDate: properties.availabilityDate,
+  reraNumber: properties.reraNumber,
+  deposit: properties.deposit,
+  maintenanceStatus: properties.maintenanceStatus,
+  maintenanceAmount: properties.maintenanceAmount,
+  possessionStatus: properties.possessionStatus,
+  possessionDate: properties.possessionDate,
+  loanStatus: properties.loanStatus,
+  lockInPeriod: properties.lockInPeriod,
+  noticePeriod: properties.noticePeriod,
+  tenantPreference: properties.tenantPreference,
+  bedCount: properties.bedCount,
+  genderPolicy: properties.genderPolicy,
+  houseRules: properties.houseRules,
+  itemizedCharges: properties.itemizedCharges,
+  verified: properties.verified,
+  views: properties.views,
+  createdAt: properties.createdAt,
+} as const;
+
+/** Owner dashboard property projection (adds status, rejectionReason, updatedAt while still omitting address and personal/KYC columns). */
+export const ownerPropertyColumns = {
+  ...publicPropertyColumns,
+  status: properties.status,
+  rejectionReason: properties.rejectionReason,
+  updatedAt: properties.updatedAt,
+} as const;
 
 export type PropertyFilters = {
   category?: string;
   city?: string;
   q?: string;
+  propertyType?: string;
   minPrice?: number;
   maxPrice?: number;
   bhk?: string;
@@ -19,25 +75,37 @@ export type PropertyFilters = {
   limit?: number;
 };
 
-export function formatPrice(price: number, category?: string) {
-  if (category === "buy_home") {
-    if (price >= 10000000) return `₹${(price / 10000000).toFixed(2).replace(/\.00$/, "")} Cr`;
-    return `₹${(price / 100000).toFixed(0)} L`;
-  }
-  if (price >= 100000) return `₹${(price / 100000).toFixed(2).replace(/\.00$/, "")} L/mo`;
-  return `₹${price.toLocaleString("en-IN")}/mo`;
-}
-
-export const categoryLabel: Record<string, string> = {
-  buy_home: "Homes for sale", rent_home: "Homes for rent", rent_pg: "PG & co-living", rent_commercial: "Commercial spaces",
-};
+export { categoryLabel, formatIndianCurrency, formatPrice } from "@/lib/format";
 
 export async function findProperties(filters: PropertyFilters = {}) {
   try {
-    const conditions: SQL[] = [eq(properties.status, "live")];
-    if (filters.category && ["buy_home", "rent_home", "rent_pg", "rent_commercial"].includes(filters.category)) conditions.push(eq(properties.category, filters.category as Property["category"]));
-    if (filters.city && filters.city.toLowerCase() !== "all cities") conditions.push(or(ilike(properties.city, `%${filters.city}%`), ilike(properties.locality, `%${filters.city}%`))!);
-    if (filters.q) conditions.push(or(ilike(properties.title, `%${filters.q}%`), ilike(properties.city, `%${filters.q}%`), ilike(properties.locality, `%${filters.q}%`), ilike(properties.propertyType, `%${filters.q}%`))!);
+    const conditions: SQL[] = [eq(properties.status, "live"), eq(properties.category, "rent_home")];
+    if (filters.city && filters.city.toLowerCase() !== "all cities") {
+      const cityTerms = expandLocationSearchVariants(filters.city);
+      if (cityTerms.length > 0) {
+        conditions.push(
+          or(...cityTerms.flatMap((term) => [ilike(properties.city, `%${term}%`), ilike(properties.locality, `%${term}%`)]))!
+        );
+      }
+    }
+    if (filters.q) {
+      const qTerms = expandLocationSearchVariants(filters.q);
+      if (qTerms.length > 0) {
+        conditions.push(
+          or(
+            ...qTerms.flatMap((term) => [
+              ilike(properties.title, `%${term}%`),
+              ilike(properties.city, `%${term}%`),
+              ilike(properties.locality, `%${term}%`),
+              ilike(properties.landmark, `%${term}%`),
+              ilike(properties.propertyType, `%${term}%`),
+              ilike(properties.bhkOrRoomType, `%${term}%`),
+            ])
+          )!
+        );
+      }
+    }
+    if (filters.propertyType) conditions.push(ilike(properties.propertyType, `%${filters.propertyType}%`));
     if (filters.minPrice !== undefined) conditions.push(gte(properties.price, filters.minPrice));
     if (filters.maxPrice !== undefined) conditions.push(lte(properties.price, filters.maxPrice));
     if (filters.minArea !== undefined) conditions.push(gte(properties.areaSqft, filters.minArea));
@@ -50,7 +118,7 @@ export async function findProperties(filters: PropertyFilters = {}) {
     const page = Math.max(filters.page || 1, 1);
     const sorting = filters.sort === "price_asc" ? [asc(properties.price)] : filters.sort === "price_desc" ? [desc(properties.price)] : filters.sort === "newest" ? [desc(properties.createdAt)] : [desc(properties.verified), asc(properties.price)];
     const [items, [{ total }]] = await Promise.all([
-      db.select().from(properties).where(where).orderBy(...sorting).limit(limit).offset((page - 1) * limit),
+      db.select(publicPropertyColumns).from(properties).where(where).orderBy(...sorting).limit(limit).offset((page - 1) * limit),
       db.select({ total: count() }).from(properties).where(where),
     ]);
     return { items: items.map(serializePublicProperty), total, page, pages: Math.ceil(total / limit), limit };
@@ -62,7 +130,15 @@ export async function findProperties(filters: PropertyFilters = {}) {
 
 export async function getProperty(id: string, includeInactive = false) {
   try {
-    const [property] = await db.select().from(properties).where(includeInactive ? eq(properties.id, id) : and(eq(properties.id, id), eq(properties.status, "live"))).limit(1);
+    const [property] = await db
+      .select(publicPropertyColumns)
+      .from(properties)
+      .where(
+        includeInactive
+          ? and(eq(properties.id, id), eq(properties.category, "rent_home"))
+          : and(eq(properties.id, id), eq(properties.status, "live"), eq(properties.category, "rent_home"))
+      )
+      .limit(1);
     return property || null;
   } catch (error) {
     console.error("Database query failed in getProperty:", error);
@@ -70,9 +146,44 @@ export async function getProperty(id: string, includeInactive = false) {
   }
 }
 
-export async function getSimilarProperties(property: Property, limit = 3) {
+/** Server-only lookup for lead creation: fetches public columns + internal ownerId (never serialized in responses). */
+export async function getPropertyForLeadCreation(id: string) {
   try {
-    const items = await db.select().from(properties).where(and(eq(properties.status, "live"), eq(properties.category, property.category))).orderBy(desc(properties.verified)).limit(limit + 1);
+    const [property] = await db
+      .select({ ...publicPropertyColumns, ownerId: properties.ownerId })
+      .from(properties)
+      .where(and(eq(properties.id, id), eq(properties.status, "live"), eq(properties.category, "rent_home")))
+      .limit(1);
+    return property || null;
+  } catch (error) {
+    console.error("Database query failed in getPropertyForLeadCreation:", error);
+    return null;
+  }
+}
+
+/** Returns the status of a property when it is not live, or null if deleted/missing. */
+export async function getUnavailablePropertyStatus(id: string): Promise<string | null> {
+  try {
+    const [row] = await db.select({ status: properties.status }).from(properties).where(eq(properties.id, id)).limit(1);
+    return row ? row.status : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Server-only ownership check without projecting ownerId into page/component props. */
+export async function isPropertyOwner(propertyId: string, userId: string): Promise<boolean> {
+  try {
+    const [row] = await db.select({ ownerId: properties.ownerId }).from(properties).where(eq(properties.id, propertyId)).limit(1);
+    return !!row && row.ownerId === userId;
+  } catch {
+    return false;
+  }
+}
+
+export async function getSimilarProperties(property: PublicPropertyInput, limit = 3) {
+  try {
+    const items = await db.select(publicPropertyColumns).from(properties).where(and(eq(properties.status, "live"), eq(properties.category, "rent_home"))).orderBy(desc(properties.verified)).limit(limit + 1);
     return items.filter((item) => item.id !== property.id).slice(0, limit).map(serializePublicProperty);
   } catch (error) {
     console.error("Database query failed in getSimilarProperties:", error);
@@ -89,7 +200,7 @@ export async function getTopNeighborhoods() {
         images: properties.images,
       })
       .from(properties)
-      .where(eq(properties.status, "live"))
+      .where(and(eq(properties.status, "live"), eq(properties.category, "rent_home")))
       .orderBy(desc(properties.views));
 
     const seen = new Set<string>();

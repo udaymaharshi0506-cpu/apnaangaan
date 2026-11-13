@@ -1,4 +1,4 @@
-# Apna Aangan (अपना आँगन)
+# Apnaangaan (अपना आँगन)
 
 A modern, privacy-first real estate marketplace application built with Next.js, React, TypeScript, Drizzle ORM, and PostgreSQL / Supabase.
 

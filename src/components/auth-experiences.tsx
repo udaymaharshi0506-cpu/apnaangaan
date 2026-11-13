@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -24,77 +24,56 @@ import {
   MapPin,
 } from "lucide-react";
 import { apiFetch, useApp, type SessionUser } from "@/components/providers";
+import { loadGoogleMapsScript, getPlaceSuggestions, reverseGeocode } from "@/lib/google-maps";
+import { extractIndianPhoneDigits, normalizeWhitespace, parseIndianPhone } from "@/lib/input-validation";
 
 // ─────────────────────────────────────────────────────────────
 // LoginExperience
-// Phone OTP login flow. Transparently creates accounts for
-// first-time users (backend upserts on verify). Links to the
-// /signup page for users who prefer the signup-oriented flow.
+// Simple direct email login for registered users.
+// Takes users straight to the home page without asking details again.
 // ─────────────────────────────────────────────────────────────
 export function LoginExperience({ next = "/" }: { next?: string }) {
   const router = useRouter();
   const { refreshUser, toast } = useApp();
 
-  const [step, setStep] = useState<"email" | "otp">("email");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitLockRef = useRef(false);
   const [error, setError] = useState("");
 
   const destination =
-    next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    next.startsWith("/") && !next.startsWith("//") && next !== "/setup" && next !== "/login" ? next : "/";
 
-  async function requestCode(event: FormEvent) {
+  async function handleLogin(event: FormEvent) {
     event.preventDefault();
+    if (busy || submitLockRef.current) return;
     setError("");
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = normalizeWhitespace(email).toLowerCase();
     if (!cleanEmail || !cleanEmail.includes("@")) {
       setError("Please enter a valid email address.");
       return;
     }
+    submitLockRef.current = true;
     setBusy(true);
     try {
-      await apiFetch<{ message: string; code?: string }>(
-        "/api/auth/otp/request",
+      const data = await apiFetch<{ user: SessionUser; message?: string }>(
+        "/api/auth/login",
         {
           method: "POST",
           body: JSON.stringify({ email: cleanEmail }),
         }
       );
-      setStep("otp");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send your code.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyCode(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const cleanEmail = email.trim().toLowerCase();
-      const data = await apiFetch<{ user: SessionUser }>(
-        "/api/auth/otp/verify",
-        {
-          method: "POST",
-          body: JSON.stringify({ email: cleanEmail, code }),
-        }
-      );
       await refreshUser();
-      router.push(
-        data.user.needsOnboarding
-          ? `/setup?next=${encodeURIComponent(destination)}`
-          : destination
-      );
+      const firstName = data.user?.name ? ` ${data.user.name.split(" ")[0]}` : "";
+      toast(`Welcome back${firstName}!`);
+      router.push(destination);
       router.refresh();
-      toast("Welcome to Aangan!");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Couldn't verify your code."
+        err instanceof Error ? err.message : "Couldn't log you in. Please check your connection and try again."
       );
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }
@@ -118,107 +97,60 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
             </span>
 
             <h1>
-              {step === "email" ? (
-                <>
-                  Log in to<br />
-                  <em>your account.</em>
-                </>
-              ) : (
-                <>
-                  Just one more<br />
-                  <em>little step.</em>
-                </>
-              )}
+              Log in to<br />
+              <em>your account.</em>
             </h1>
 
             <p>
-              {step === "email"
-                ? "Enter your Gmail or email address to log in. We'll send a quick verification code — no passwords needed."
-                : `Enter the 6-digit code sent to ${email}. It keeps your account safe and simple.`}
+              Enter your registered Gmail or email address to log in. We will take you straight to your account.
             </p>
 
-            {/* ── Email form ──────────────────────────── */}
-            {step === "email" ? (
-              <form onSubmit={(e) => void requestCode(e)}>
-                <label className="form-label" htmlFor="login-email">GMAIL / EMAIL ADDRESS</label>
-                <div className="auth-input-wrap">
-                  <Mail className="auth-input-icon" size={18} />
-                  <input
-                    id="login-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email (e.g. name@gmail.com)"
-                    required
-                    autoComplete="email"
-                    aria-label="Email address"
-                    className="form-input"
-                  />
-                </div>
-                <button
-                  id="login-send-code-btn"
-                  className="btn btn-primary btn-full"
-                  disabled={busy || !email.trim() || !email.includes("@")}
-                >
-                  {busy ? "Sending code…" : "Continue with email"}{" "}
-                  <ArrowRight size={18} />
-                </button>
-              </form>
-            ) : (
-              /* ── OTP form ──────────────────────────── */
-              <form onSubmit={(e) => void verifyCode(e)}>
-                <label className="form-label" htmlFor="login-otp-input">6-DIGIT VERIFICATION CODE</label>
-                <div className="auth-input-wrap">
-                  <input
-                    id="login-otp-input"
-                    className="otp-input"
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                    placeholder="• • • • • •"
-                    autoFocus
-                    required
-                    aria-label="6-digit verification code"
-                  />
-                </div>
-                <button
-                  id="login-verify-btn"
-                  className="btn btn-primary btn-full"
-                  disabled={busy || code.length !== 6}
-                >
-                  {busy ? "Verifying…" : "Verify & continue"}{" "}
-                  <ArrowRight size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="auth-text-button"
-                  onClick={() => {
-                    setStep("email");
-                    setCode("");
-                    setError("");
-                  }}
-                >
-                  Use a different email address
-                </button>
-              </form>
-            )}
+            <form onSubmit={(e) => void handleLogin(e)}>
+              <label className="form-label" htmlFor="login-email">GMAIL / EMAIL ADDRESS</label>
+              <div className="auth-input-wrap">
+                <Mail className="auth-input-icon" size={18} />
+                <input
+                  id="login-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email (e.g. name@gmail.com)"
+                  required
+                  autoComplete="email"
+                  aria-label="Email address"
+                  className="form-input"
+                />
+              </div>
+              <button
+                id="login-submit-btn"
+                className="btn btn-primary btn-full"
+                disabled={busy || !email.trim() || !email.includes("@")}
+              >
+                {busy ? "Logging in…" : "Log in"}{" "}
+                <ArrowRight size={18} />
+              </button>
+            </form>
 
             {error && (
-              <div className="form-error" role="alert">
-                {error}
+              <div className="form-error" role="alert" style={{ marginTop: "14px" }}>
+                <span>{error}</span>
+                {error.toLowerCase().includes("no account") && (
+                  <div style={{ marginTop: "8px" }}>
+                    <Link href={`/signup${destination !== "/" ? `?next=${encodeURIComponent(destination)}` : ""}`} className="btn btn-secondary btn-full" style={{ fontSize: "13px", padding: "8px 12px" }}>
+                      Create your free account →
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
 
             <p className="auth-agreement">
               By continuing, you agree to our{" "}
-              <Link href="/privacy">Privacy Policy</Link>. Your number is never
-              shared with another user.
+              <Link href="/privacy">Privacy Policy</Link>. Your details are always private and protected.
             </p>
             <p className="auth-agreement">
               New here?{" "}
-              <Link href="/signup" className="auth-switch-link">
+              <Link href={`/signup${destination !== "/" ? `?next=${encodeURIComponent(destination)}` : ""}`} className="auth-switch-link">
                 Create your free account →
               </Link>
             </p>
@@ -243,7 +175,7 @@ export function LoginExperience({ next = "/" }: { next?: string }) {
             </h2>
             <p>
               Verified places. Real peace of mind.<br />
-              Everything else, we'll handle together.
+              Everything else, we&apos;ll handle together.
             </p>
           </div>
           <div className="auth-image-pill">
@@ -272,28 +204,38 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
   const [role, setRole] = useState<"customer" | "owner">("customer");
   const [location, setLocation] = useState(user?.location || user?.city || "");
   const [locationTouched, setLocationTouched] = useState(false);
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([]);
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
+  const [isGoogleActive, setIsGoogleActive] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [detectMessage, setDetectMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const setupLockRef = useRef(false);
   const [error, setError] = useState("");
+
+  // Dynamically initialize Google Maps Places API script
+  useEffect(() => {
+    void loadGoogleMapsScript();
+  }, []);
 
   useEffect(() => {
     if (user?.name && !name) setName(user.name);
-    if (user?.phone && !phone) setPhone(user.phone.replace(/^\+91/, "").replace(/\D/g, "").slice(0, 10));
+    if (user?.phone && !phone) setPhone(extractIndianPhoneDigits(user.phone));
     if ((user?.location || user?.city) && !location) setLocation(user.location || user.city || "");
   }, [user]);
 
   // Strict numeric-only digits (0-9)
-  const cleanDigits = phone.replace(/\D/g, "").slice(0, 10);
-  const isPhoneValid = /^[6-9]\d{9}$/.test(cleanDigits);
-  const isNameValid = name.trim().length >= 2;
-  const isLocationValid = location.trim().length >= 2;
+  const cleanDigits = extractIndianPhoneDigits(phone);
+  const cleanName = normalizeWhitespace(name);
+  const cleanLocation = normalizeWhitespace(location);
+  const isPhoneValid = parseIndianPhone(cleanDigits).valid;
+  const isNameValid = cleanName.length >= 2;
+  const isLocationValid = cleanLocation.length >= 2;
   const isFormValid = isNameValid && isPhoneValid && isLocationValid && consent;
 
-  // Searchable location suggestions
+  // Searchable location suggestions using Google Places API with instant fallbacks
   useEffect(() => {
     const term = location.trim();
     const fallbackCities = [
@@ -311,29 +253,36 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
       "Chandigarh",
     ];
 
-    const timer = setTimeout(() => {
-      fetch(`/api/locations?q=${encodeURIComponent(term)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
-            setLocationSuggestions(data.suggestions);
-          } else {
-            setLocationSuggestions(
-              fallbackCities.filter((c) => c.toLowerCase().includes(term.toLowerCase()))
-            );
-          }
-        })
-        .catch(() => {
+    if (!term) {
+      setLocationSuggestions(fallbackCities.slice(0, 6));
+      setIsGoogleActive(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await getPlaceSuggestions(term);
+        if (res.suggestions.length > 0) {
+          setLocationSuggestions(res.suggestions);
+          setIsGoogleActive(res.isGoogle);
+        } else {
           setLocationSuggestions(
             fallbackCities.filter((c) => c.toLowerCase().includes(term.toLowerCase()))
           );
-        });
-    }, 150);
+          setIsGoogleActive(false);
+        }
+      } catch {
+        setLocationSuggestions(
+          fallbackCities.filter((c) => c.toLowerCase().includes(term.toLowerCase()))
+        );
+        setIsGoogleActive(false);
+      }
+    }, 120);
 
     return () => clearTimeout(timer);
   }, [location]);
 
-  // Geolocation auto-detection
+  // Geolocation auto-detection with Google Geocoder & server reverse fallback
   async function handleDetectLocation() {
     setDetectMessage(null);
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -346,42 +295,20 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
       async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          const res = await fetch(`/api/locations/reverse?lat=${latitude}&lon=${longitude}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.location) {
-              setLocation(data.location);
-              setLocationTouched(true);
-              setShowLocationSuggestions(false);
-              setDetectMessage({ text: `Detected: ${data.location}`, isError: false });
-              setDetectingLocation(false);
-              return;
-            }
+          const result = await reverseGeocode(latitude, longitude);
+          if (result && result.location) {
+            setLocation(result.location);
+            setLocationTouched(true);
+            setShowLocationSuggestions(false);
+            setDetectMessage({
+              text: `Detected: ${result.location}${result.isGoogle ? " (via Google Maps)" : ""}`,
+              isError: false,
+            });
+            setDetectingLocation(false);
+            return;
           }
         } catch (err) {
-          console.warn("Reverse geocode server lookup failed:", err);
-        }
-
-        try {
-          const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const locality = data.locality || data.principalSubdivision;
-            const city = data.city || data.principalSubdivision;
-            const detected = [locality, city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ");
-            if (detected) {
-              setLocation(detected);
-              setLocationTouched(true);
-              setShowLocationSuggestions(false);
-              setDetectMessage({ text: `Detected: ${detected}`, isError: false });
-              setDetectingLocation(false);
-              return;
-            }
-          }
-        } catch (err) {
-          console.warn("Client reverse geocode failed:", err);
+          console.warn("Reverse geocode lookup error:", err);
         }
 
         setDetectMessage({ text: "Could not detect city automatically. Please enter it manually.", isError: true });
@@ -403,15 +330,18 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy || setupLockRef.current) return;
+    setHasAttemptedSubmit(true);
     setError("");
 
     if (!isNameValid) {
-      setError("Please enter your full name.");
+      setError("Please enter your full name (at least 2 characters, whitespace alone is not valid).");
       return;
     }
 
-    if (!isPhoneValid) {
-      setError("Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
+    const parsedPhone = parseIndianPhone(phone);
+    if (!parsedPhone.valid) {
+      setError(parsedPhone.error);
       return;
     }
 
@@ -425,16 +355,18 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
       return;
     }
 
+    setupLockRef.current = true;
     setBusy(true);
     try {
       await apiFetch("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          name: name.trim(),
-          phone: `+91${cleanDigits}`,
+          email: user?.email || undefined,
+          name: cleanName,
+          phone: parsedPhone.e164,
           role,
-          location: location.trim(),
-          city: location.trim(),
+          location: cleanLocation,
+          city: cleanLocation,
           addOwnerRole: role === "owner",
           consent: true,
         }),
@@ -446,12 +378,13 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
         role === "owner" && destination === "/" ? "/owner" : destination
       );
       router.refresh();
-      toast("You're all set. Welcome to Aangan!");
+      toast("You're all set. Welcome to Apnaangaan!");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Couldn't save your profile."
+        err instanceof Error ? err.message : "Network connection dropped while saving your profile. Please tap Let's get started to retry."
       );
     } finally {
+      setupLockRef.current = false;
       setBusy(false);
     }
   }
@@ -560,13 +493,13 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
               }}
               onPaste={(e) => {
                 e.preventDefault();
-                const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 10);
+                const pasted = extractIndianPhoneDigits(e.clipboardData.getData("text"));
                 setPhone(pasted);
                 setPhoneTouched(true);
               }}
               onInput={(e) => {
                 const target = e.currentTarget;
-                const stripped = target.value.replace(/\D/g, "").slice(0, 10);
+                const stripped = extractIndianPhoneDigits(target.value);
                 if (target.value !== stripped) {
                   target.value = stripped;
                 }
@@ -574,7 +507,7 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
                 setPhoneTouched(true);
               }}
               onChange={(e) => {
-                const stripped = e.target.value.replace(/\D/g, "").slice(0, 10);
+                const stripped = extractIndianPhoneDigits(e.target.value);
                 setPhone(stripped);
                 setPhoneTouched(true);
               }}
@@ -613,7 +546,7 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
             >
               <Home size={23} />
               <strong>Home Seeker</strong>
-              <span>Find, rent, or buy a space</span>
+              <span>Find &amp; rent a verified home</span>
               <Check size={18} className="role-check" />
             </button>
             <button
@@ -629,10 +562,33 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
             </button>
           </div>
 
-          {/* 4. Compulsory Location Field (right below Role selection) */}
-          <label className="form-label" htmlFor="setup-location" style={{ marginTop: "20px" }}>
-            TARGET LOCATION / CITY <span style={{ color: "#dc2626" }}>*</span>
-          </label>
+          {/* 4. Compulsory Location Field (Clean header action row + full width input + quick chips) */}
+          <div className="location-header-row">
+            <label className="form-label" htmlFor="setup-location">
+              TARGET LOCATION / CITY <span style={{ color: "#dc2626" }}>*</span>
+            </label>
+            <button
+              type="button"
+              id="detect-location-btn"
+              className="detect-location-btn-header"
+              onClick={() => void handleDetectLocation()}
+              disabled={detectingLocation}
+              title="Detect my current location automatically"
+            >
+              {detectingLocation ? (
+                <>
+                  <Loader2 size={13} className="spin" />
+                  <span>Detecting...</span>
+                </>
+              ) : (
+                <>
+                  <Navigation size={13} />
+                  <span>Detect location</span>
+                </>
+              )}
+            </button>
+          </div>
+
           <div className="location-input-group">
             <div className="location-field-inner">
               <MapPin className="auth-input-icon" size={18} />
@@ -648,49 +604,34 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
                 onFocus={() => setShowLocationSuggestions(true)}
                 onBlur={() => {
                   setLocationTouched(true);
-                  setTimeout(() => setShowLocationSuggestions(false), 200);
+                  setTimeout(() => setShowLocationSuggestions(false), 220);
                 }}
                 required
                 minLength={2}
                 placeholder="e.g. Bengaluru, Mumbai, Pune, Delhi NCR"
-                autoComplete="address-level2"
+                autoComplete="off"
               />
-              <button
-                type="button"
-                id="detect-location-btn"
-                className="detect-location-btn"
-                onClick={() => void handleDetectLocation()}
-                disabled={detectingLocation}
-                title="Detect my current location automatically"
-              >
-                {detectingLocation ? (
-                  <>
-                    <Loader2 size={14} className="spin" />
-                    <span>Detecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Navigation size={14} />
-                    <span>Detect location</span>
-                  </>
-                )}
-              </button>
+              {location && (
+                <button
+                  type="button"
+                  className="clear-location-btn"
+                  onClick={() => {
+                    setLocation("");
+                    setLocationTouched(false);
+                  }}
+                  aria-label="Clear location"
+                >
+                  ×
+                </button>
+              )}
             </div>
 
             {showLocationSuggestions && locationSuggestions.length > 0 && (
               <div className="setup-location-suggestions">
-                <span
-                  style={{
-                    display: "block",
-                    fontSize: "10px",
-                    fontWeight: 800,
-                    letterSpacing: "1px",
-                    color: "var(--muted)",
-                    padding: "6px 10px",
-                  }}
-                >
-                  SUGGESTED CITIES &amp; AREAS
-                </span>
+                <div className="suggestions-header">
+                  <span>SUGGESTED CITIES &amp; AREAS</span>
+                  {isGoogleActive && <span className="google-powered-tag">Google Maps</span>}
+                </div>
                 {locationSuggestions.map((item) => (
                   <button
                     key={item}
@@ -710,6 +651,25 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
             )}
           </div>
 
+          {/* Quick Select City Chips for 1-tap ease */}
+          <div className="location-quick-chips">
+            <span className="chips-label">Popular:</span>
+            {["Bengaluru", "Mumbai", "Delhi NCR", "Pune", "Hyderabad", "Gurugram"].map((cityName) => (
+              <button
+                key={cityName}
+                type="button"
+                className={`location-chip ${location.toLowerCase().includes(cityName.toLowerCase()) ? "active" : ""}`}
+                onClick={() => {
+                  setLocation(cityName);
+                  setLocationTouched(true);
+                  setShowLocationSuggestions(false);
+                }}
+              >
+                {cityName}
+              </button>
+            ))}
+          </div>
+
           {detectMessage && (
             <div className={`detect-status-note ${detectMessage.isError ? "error" : "success"}`}>
               {detectMessage.isError ? <AlertCircle size={13} /> : <CheckCircle2 size={13} />}
@@ -717,13 +677,13 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
             </div>
           )}
 
-          {locationTouched && !isLocationValid ? (
-            <div className="field-feedback error" style={{ marginTop: "4px" }}>
+          {(hasAttemptedSubmit || (locationTouched && location.length > 0)) && !isLocationValid ? (
+            <div className="field-feedback error" style={{ marginTop: "6px" }}>
               <AlertCircle size={14} />
               <span>Please enter or select a valid city or location (at least 2 characters).</span>
             </div>
           ) : (
-            <small style={{ display: "block", color: "var(--muted)", fontSize: "11px", marginBottom: "16px" }}>
+            <small style={{ display: "block", color: "var(--muted)", fontSize: "11px", marginTop: "6px", marginBottom: "16px" }}>
               Required so we know which city or area you are looking for or listing a home in.
             </small>
           )}
@@ -738,7 +698,7 @@ export function SetupExperience({ next = "/" }: { next?: string }) {
               required
             />
             <span>
-              I agree to Aangan collecting and using my details to help with my
+              I agree to Apnaangaan collecting and using my details to help with my
               property journey, as described in the{" "}
               <Link href="/privacy">Privacy Policy</Link>. I can delete my
               account at any time.
@@ -808,7 +768,7 @@ export function WelcomeExperience() {
         <div className="welcome-photo">
           <img src={slide.image} alt="Welcoming property space" />
           <span className="welcome-photo-badge">
-            <slide.Icon size={18} /> The Aangan way
+            <slide.Icon size={18} /> The Apnaangaan way
           </span>
         </div>
         <div className="welcome-copy">

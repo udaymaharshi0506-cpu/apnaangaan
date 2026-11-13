@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -33,6 +33,7 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitLockRef = useRef(false);
   const [error, setError] = useState("");
 
   const destination =
@@ -41,12 +42,14 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
   // ── Step 1: request OTP ───────────────────────────────
   async function requestCode(event: FormEvent) {
     event.preventDefault();
+    if (busy || submitLockRef.current) return;
     setError("");
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes("@")) {
       setError("Please enter a valid email address.");
       return;
     }
+    submitLockRef.current = true;
     setBusy(true);
     try {
       await apiFetch<{ message: string; code?: string }>(
@@ -58,8 +61,9 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
       );
       setStep("otp");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send your code.");
+      setError(err instanceof Error ? err.message : "Couldn't send your code. Check your internet and try again.");
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }
@@ -67,7 +71,9 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
   // ── Step 2: verify OTP, create/sign-in user ───────────
   async function verifyCode(event: FormEvent) {
     event.preventDefault();
+    if (busy || submitLockRef.current) return;
     setError("");
+    submitLockRef.current = true;
     setBusy(true);
     try {
       const cleanEmail = email.trim().toLowerCase();
@@ -79,15 +85,20 @@ export function SignupExperience({ next = "/" }: { next?: string }) {
         }
       );
       await refreshUser();
-      // Always go to setup on signup so users fill in their profile
-      router.push(`/setup?next=${encodeURIComponent(destination)}`);
+      if (data.user.needsOnboarding) {
+        router.push(`/setup?next=${encodeURIComponent(destination)}`);
+        toast("Welcome to Apnaangaan! Let's set up your profile.");
+      } else {
+        router.push(destination);
+        toast("Welcome back! You're all set.");
+      }
       router.refresh();
-      toast("Welcome to Aangan! Let's set up your profile.");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Couldn't verify your code."
+        err instanceof Error ? err.message : "Couldn't verify your code. Check your internet and try again."
       );
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }

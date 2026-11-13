@@ -24,24 +24,34 @@ export function LocationSuggest({ value, onChange, placeholder = "City, locality
 
 export function HeroSearch() {
   const router = useRouter();
-  const [mode, setMode] = useState<"buy" | "rent">("buy");
-  const [rentKind, setRentKind] = useState<"rent_home" | "rent_pg" | "rent_commercial">("rent_home");
+  const [bhk, setBhk] = useState<string>("");
   const [location, setLocation] = useState("");
-  const [rentOpen, setRentOpen] = useState(false);
-  const category = mode === "buy" ? "buy_home" : rentKind;
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    const query = new URLSearchParams({ category });
+    const query = new URLSearchParams();
     if (location.trim()) query.set("q", location.split(",")[0].trim());
-    router.push(`/search?${query.toString()}`);
+    if (bhk) query.set("bhk", bhk);
+    router.push(`/search${query.toString() ? `?${query.toString()}` : ""}`);
   }
+
   return <div className="hero-search-panel">
-    <div className="hero-search-tabs"><button className={mode === "buy" ? "active" : ""} onClick={() => setMode("buy")}>Buy a home</button><button className={mode === "rent" ? "active" : ""} onClick={() => setMode("rent")}>Rent a space</button></div>
+    <div className="hero-search-tabs">
+      <button className={!bhk ? "active" : ""} onClick={() => setBhk("")}>Rent a home</button>
+      <button className={bhk === "1" ? "active" : ""} onClick={() => setBhk("1")}>1 BHK</button>
+      <button className={bhk === "2" ? "active" : ""} onClick={() => setBhk("2")}>2 BHK</button>
+      <button className={bhk === "3" ? "active" : ""} onClick={() => setBhk("3")}>3 BHK</button>
+    </div>
     <form className="hero-search-form" onSubmit={submit}>
-      {mode === "rent" && <div className="rent-kind-wrap"><button type="button" className="rent-kind-button" onClick={() => setRentOpen(!rentOpen)}>{rentKind === "rent_home" ? "Homes" : rentKind === "rent_pg" ? "PG" : "Commercial"}<ChevronDown size={16}/></button>{rentOpen && <div className="rent-kind-menu">{[["Homes", "rent_home"], ["PG & Co-living", "rent_pg"], ["Commercial", "rent_commercial"]].map(([label, value]) => <button type="button" key={value} onClick={() => { setRentKind(value as typeof rentKind); setRentOpen(false); }}>{label}</button>)}</div>}</div>}
-      <LocationSuggest value={location} onChange={setLocation} placeholder="Where would you like to live?" className="hero-location"/>
-      <button type="submit" className="hero-search-button"><Search size={19}/><span>Search homes</span></button>
+      <LocationSuggest value={location} onChange={setLocation} placeholder="Where in the city would you like to rent?" className="hero-location"/>
+      <button type="submit" className="hero-search-button"><Search size={19}/><span>Search rentals</span></button>
     </form>
-    <div className="hero-quick-filters"><span>Popular:</span><button onClick={() => router.push(`/search?category=${category}&verified=true`)}><Sparkles size={13}/> Verified homes</button><button onClick={() => router.push(`/search?category=${category}&bhk=2`)}>2 BHK</button><button onClick={() => router.push(`/search?category=${category}&bhk=3`)}>3 BHK</button><button className="quick-all" onClick={() => router.push(`/search?category=${category}`)}>All filters <SlidersHorizontal size={13}/></button></div>
+    <div className="hero-quick-filters">
+      <span>Popular:</span>
+      <button onClick={() => router.push(`/search?verified=true`)}><Sparkles size={13}/> Verified rentals</button>
+      <button onClick={() => router.push(`/search?furnishing=Fully+furnished`)}>Fully furnished</button>
+      <button onClick={() => router.push(`/search?propertyType=Villa`)}>Independent villas</button>
+      <button className="quick-all" onClick={() => router.push(`/search`)}>All filters <SlidersHorizontal size={13}/></button>
+    </div>
   </div>;
 }

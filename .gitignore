@@ -32,6 +32,9 @@ mrrr
 # vercel
 .vercel
 
+# backups
+backups/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
