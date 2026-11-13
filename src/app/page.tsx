@@ -33,7 +33,12 @@ export default async function HomePage() {
         </div>
         <div className="hero-visual hero-reveal hero-delay-2">
           <div className="hero-photo-shape">
-            <img src="https://images.pexels.com/photos/7031732/pexels-photo-7031732.jpeg?auto=compress&cs=tinysrgb&w=1500" alt="Sunlit modern living room with warm neutral interiors"/>
+            <img
+              src="https://images.pexels.com/photos/7031732/pexels-photo-7031732.jpeg?auto=compress&cs=tinysrgb&w=1500"
+              alt="Sunlit modern living room with warm neutral interiors"
+              fetchPriority="high"
+              decoding="async"
+            />
           </div>
           <div className="hero-photo-tag">
             <span className="tag-sparkle"><Sparkles size={17}/></span>
@@ -91,6 +96,7 @@ export default async function HomePage() {
                 src="https://images.pexels.com/photos/7214171/pexels-photo-7214171.jpeg?auto=compress&cs=tinysrgb&w=1400"
                 alt="Rent a home"
                 loading="lazy"
+                decoding="async"
               />
               <span className="category-shade"/>
               <span className="category-top">
@@ -127,7 +133,12 @@ export default async function HomePage() {
           </div>
           <div className="privacy-story-visual">
             <div className="privacy-photo">
-              <img src="https://images.pexels.com/photos/7018401/pexels-photo-7018401.jpeg?auto=compress&cs=tinysrgb&w=1000" alt="Bright welcoming apartment interior" loading="lazy"/>
+              <img
+                src="https://images.pexels.com/photos/7018401/pexels-photo-7018401.jpeg?auto=compress&cs=tinysrgb&w=1000"
+                alt="Bright welcoming apartment interior"
+                loading="lazy"
+                decoding="async"
+              />
             </div>
             <div className="privacy-visual-stamp">
               <LockKeyhole size={25}/>
@@ -153,7 +164,7 @@ export default async function HomePage() {
             <div className="neighborhood-grid">
               {neighborhoods.map((area) => (
                 <Link href={`/search?q=${encodeURIComponent(area.name)}`} className="neighborhood-card" key={area.name}>
-                  <img src={area.image} alt="" loading="lazy"/>
+                  <img src={area.image} alt="" loading="lazy" decoding="async"/>
                   <div>
                     <span>EXPLORE AREA</span>
                     <strong>{area.name}</strong>

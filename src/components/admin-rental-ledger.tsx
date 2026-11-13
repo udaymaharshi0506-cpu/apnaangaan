@@ -1598,8 +1598,45 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
           MODAL 1: RECORD PAYMENT / TRANSACTION
          ───────────────────────────────────────────────────────────── */}
       {paymentModalOpen && (
-        <div className="ledger-modal-backdrop" onClick={() => setPaymentModalOpen(false)}>
-          <div className="ledger-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+        <div
+          className="ledger-modal-backdrop"
+          onClick={() => setPaymentModalOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.72)",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px 16px",
+            overflowY: "auto",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            className="ledger-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 540,
+              width: "100%",
+              background: "#ffffff",
+              color: "#0f172a",
+              borderRadius: 20,
+              border: "1px solid rgba(0, 0, 0, 0.08)",
+              boxShadow: "0 25px 65px -12px rgba(15, 23, 42, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.06)",
+              padding: "28px 32px",
+              position: "relative",
+              maxHeight: "calc(100vh - 48px)",
+              overflowY: "auto",
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              gap: 20,
+            }}
+          >
             <div className="ledger-modal-header">
               <div>
                 <h3>Record Payment / Transaction</h3>
@@ -1750,8 +1787,45 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
           MODAL 2: CREATE NEW RENTAL DEAL
          ───────────────────────────────────────────────────────────── */}
       {newDealModalOpen && (
-        <div className="ledger-modal-backdrop" onClick={() => setNewDealModalOpen(false)}>
-          <div className="ledger-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+        <div
+          className="ledger-modal-backdrop"
+          onClick={() => setNewDealModalOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.72)",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px 16px",
+            overflowY: "auto",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            className="ledger-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 620,
+              width: "100%",
+              background: "#ffffff",
+              color: "#0f172a",
+              borderRadius: 20,
+              border: "1px solid rgba(0, 0, 0, 0.08)",
+              boxShadow: "0 25px 65px -12px rgba(15, 23, 42, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.06)",
+              padding: "28px 32px",
+              position: "relative",
+              maxHeight: "calc(100vh - 48px)",
+              overflowY: "auto",
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              gap: 20,
+            }}
+          >
             <div className="ledger-modal-header">
               <div>
                 <h3>Create New Rental Deal</h3>

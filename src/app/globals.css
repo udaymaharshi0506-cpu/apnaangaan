@@ -504,9 +504,78 @@ html[data-theme="dark"] .skeleton{background:linear-gradient(90deg,#213434 0%,rg
 .vp-saving-icon {
   font-size: 18px;
 }
+.vp-saving-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .vp-saving-banner strong {
   font-weight: 800;
   color: #047857;
+}
+
+/* Brokerage role toggle */
+.vp-role-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  background: var(--surface-soft);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+.vp-role-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 8px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-smooth);
+}
+.vp-role-btn:hover {
+  color: var(--ink);
+}
+.vp-role-active {
+  background: var(--surface);
+  color: var(--brand-deep);
+  border-color: rgba(22, 79, 76, 0.18);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-weight: 800;
+}
+.vp-role-pct {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--brand-pale);
+  color: var(--brand);
+}
+.vp-role-active .vp-role-pct {
+  background: var(--brand);
+  color: #fff;
+}
+.vp-breakdown-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.vp-model-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
 }
 
 /* 3. Privacy Shield */
@@ -696,5 +765,59 @@ html[data-theme="dark"] .skeleton{background:linear-gradient(90deg,#213434 0%,rg
     gap: 8px;
     width: 100%;
     height: 48px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   MOBILE RESPONSIVENESS, 60FPS PERFORMANCE & TYPOGRAPHY SCALING
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Eliminate scroll lag on mobile by disabling heavy backdrop-filter blur */
+  .site-header {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+  }
+  html[data-theme="dark"] .site-header {
+    background: rgba(25, 43, 43, 0.98) !important;
+  }
+
+  /* Responsive typography scaling */
+  .hero-copy h1 {
+    font-size: clamp(28px, 8.5vw, 42px) !important;
+    line-height: 1.15 !important;
+    letter-spacing: -1.2px !important;
+  }
+  .section-heading-row h2,
+  .privacy-story h2,
+  .final-cta h2,
+  .vp-section-head h2 {
+    font-size: clamp(22px, 6vw, 30px) !important;
+    letter-spacing: -0.8px !important;
+  }
+
+  /* Lock aspect-ratio 16/10 to eliminate Cumulative Layout Shift (CLS = 0) */
+  .property-image-wrap {
+    aspect-ratio: 16/10 !important;
+    height: auto !important;
+  }
+
+  /* Value props model pill stack */
+  .vp-breakdown-footer {
+    flex-direction: column;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-copy h1 {
+    font-size: clamp(26px, 8vw, 36px) !important;
+  }
+  .vp-widget {
+    padding: 20px 14px;
+    border-radius: 16px;
+  }
+  .vp-compare-amount {
+    font-size: 19px;
   }
 }

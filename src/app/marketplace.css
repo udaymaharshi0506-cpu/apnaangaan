@@ -672,6 +672,16 @@
   }
 }
 
+/* Ensure mobile floating bar is strictly hidden on desktop */
+@media (min-width: 701px) {
+  .detail-mobile-bar {
+    display: none !important;
+  }
+  .detail-sidebar {
+    display: block !important;
+  }
+}
+
 /* ==========================================================================
    Mobile-Optimized Auth Pages (Login & Signup) - Native, Clean & Professional
    Fixes: iOS auto-zoom, focus outline overflow, keyboard overflow, tabbar clash

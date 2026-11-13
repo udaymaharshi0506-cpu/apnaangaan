@@ -57,6 +57,7 @@ export function PropertyCard({ property, compact = false }: { property: PublicPr
             src={images[photoIndex]}
             alt={property.title}
             loading="lazy"
+            decoding="async"
             onLoad={() => setImgLoaded(true)}
             className={`property-image ${imgLoaded ? "is-loaded" : "is-loading"}`}
           />

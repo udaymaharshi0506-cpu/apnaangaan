@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Clock, TrendingDown, Shield, PhoneOff, CheckCircle2, ArrowRight, IndianRupee, Percent, Phone, X, BadgeCheck } from "lucide-react";
+import { useState, useEffect, useRef, memo, useMemo } from "react";
+import { Clock, TrendingDown, Shield, PhoneOff, CheckCircle2, BadgeCheck, X, Phone, UserCheck, KeyRound } from "lucide-react";
 
 /* ─────────── 1. Flexible Stay Duration Switcher ─────────── */
 const durations = [
@@ -9,8 +9,8 @@ const durations = [
     months: 6,
     label: "6 Months",
     tagline: "Short-term flexibility",
-    description: "Great for professionals on project-based work, students, or those exploring a new city before committing.",
-    benefits: ["No long-term lock-in", "Ideal for transitions", "Renew or move freely"],
+    description: "Great for professionals on project work, students, or those testing a new area before committing long-term.",
+    benefits: ["Zero long-term lock-in", "Ideal for career transitions", "Renew or relocate freely"],
     color: "#e8f1ed",
     accent: "#164f4c",
   },
@@ -18,8 +18,8 @@ const durations = [
     months: 9,
     label: "9 Months",
     tagline: "Balanced & popular",
-    description: "The sweet spot. Long enough to settle in, short enough to stay flexible. Most home seekers prefer this.",
-    benefits: ["Best value & stability", "Popular with families", "Academic year aligned"],
+    description: "The sweet spot. Long enough to settle in, short enough to stay agile. Most home seekers prefer this tier.",
+    benefits: ["Maximum price stability", "Popular with families", "Academic/fiscal year aligned"],
     color: "#fdf4e8",
     accent: "#b87333",
   },
@@ -27,14 +27,14 @@ const durations = [
     months: 12,
     label: "12 Months",
     tagline: "Full-year commitment",
-    description: "Settle in properly. Owners love the certainty and you get the most stable, uninterrupted living experience.",
-    benefits: ["Maximum stability", "Preferred by owners", "Best negotiation power"],
+    description: "Settle in completely. Owners prefer annual agreements and you get the best negotiation terms with zero disruption.",
+    benefits: ["Highest rental stability", "Priority owner preference", "Predictable yearly budget"],
     color: "#f0edfb",
     accent: "#6c4fc7",
   },
 ];
 
-export function FlexibleStayWidget() {
+export const FlexibleStayWidget = memo(function FlexibleStayWidget() {
   const [active, setActive] = useState(1);
   const d = durations[active];
 
@@ -46,7 +46,7 @@ export function FlexibleStayWidget() {
           FLEXIBLE STAYS
         </span>
         <h3>Choose your timeline, <em>on your terms.</em></h3>
-        <p>Rent for 6, 9, or 12 months — no rigid annual lock-ins, no pressure.</p>
+        <p>Rent for 6, 9, or 12 months — no rigid lock-ins, no unnecessary pressure.</p>
       </div>
 
       <div className="vp-duration-pills">
@@ -69,7 +69,7 @@ export function FlexibleStayWidget() {
             <span className="vp-months-num">{d.months}</span>
             <span className="vp-months-label">months</span>
           </div>
-          <div>
+          <div className="vp-duration-info">
             <strong className="vp-duration-tagline" style={{ color: d.accent }}>{d.tagline}</strong>
             <p className="vp-duration-desc">{d.description}</p>
           </div>
@@ -85,7 +85,7 @@ export function FlexibleStayWidget() {
       </div>
     </div>
   );
-}
+});
 
 /* ─────────── 2. Brokerage Comparison Widget ─────────── */
 function AnimatedBar({ value, max, color, animate }: { value: number; max: number; color: string; animate: boolean }) {
@@ -97,28 +97,27 @@ function AnimatedBar({ value, max, color, animate }: { value: number; max: numbe
         style={{
           width: animate ? `${pct}%` : "0%",
           background: color,
-          transition: "width 0.9s cubic-bezier(0.22, 1, 0.36, 1)",
+          transform: "translateZ(0)",
+          transition: "width 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       />
     </div>
   );
 }
 
-export function BrokerageWidget() {
-  const [rent, setRent] = useState(20000);
+export const BrokerageWidget = memo(function BrokerageWidget() {
+  const [role, setRole] = useState<"seeker" | "owner">("seeker");
+  const [rent, setRent] = useState(25000);
   const [animate, setAnimate] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Immediate fallback for mobile
-    const fallback = setTimeout(() => setAnimate(true), 500);
-
+    const fallback = setTimeout(() => setAnimate(true), 400);
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") {
       setAnimate(true);
       return () => clearTimeout(fallback);
     }
-
     const obs = new IntersectionObserver(([e]) => {
       if (e.isIntersecting) {
         setAnimate(true);
@@ -126,7 +125,6 @@ export function BrokerageWidget() {
         obs.disconnect();
       }
     }, { threshold: 0.05 });
-
     obs.observe(el);
     return () => {
       clearTimeout(fallback);
@@ -134,26 +132,57 @@ export function BrokerageWidget() {
     };
   }, []);
 
-  const traditional = rent; // 1 month full brokerage
-  const seekerFee = Math.round(rent * 0.5);
-  const ownerFee = Math.round(rent * 0.15);
-  const saving = traditional - seekerFee;
+  // Strict calculations
+  const traditional = rent; // Traditional brokers demand 1 full month's rent (100%)
+  const seekerFee = useMemo(() => Math.round(rent * 0.50), [rent]); // 50% for Home Seeker
+  const ownerFee = useMemo(() => Math.round(rent * 0.15), [rent]); // 15% for Property Owner
+
+  const activeFee = role === "seeker" ? seekerFee : ownerFee;
+  const activeSaving = traditional - activeFee;
+  const activePctSaved = role === "seeker" ? "50%" : "85%";
 
   return (
     <div className="vp-widget" ref={ref}>
       <div className="vp-widget-head">
         <span className="vp-eyebrow">
           <TrendingDown size={13} />
-          FAIR BROKERAGE
+          FAIR &amp; TRANSPARENT BROKERAGE
         </span>
         <h3>Pay less. Get <em>more.</em></h3>
-        <p>See exactly how much you save with Apna Aangan&apos;s transparent, shared fee model.</p>
+        <p>Transparent fee model: 50% from Home Seeker · 15% from Property Owner. Zero hidden charges.</p>
       </div>
 
+      {/* Role Switcher Pill */}
+      <div className="vp-role-toggle" role="tablist" aria-label="Choose user role">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={role === "seeker"}
+          className={`vp-role-btn ${role === "seeker" ? "active" : ""}`}
+          onClick={() => setRole("seeker")}
+        >
+          <UserCheck size={14} />
+          <span>Home Seeker</span>
+          <span className="vp-role-pct">50% fee</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={role === "owner"}
+          className={`vp-role-btn ${role === "owner" ? "active" : ""}`}
+          onClick={() => setRole("owner")}
+        >
+          <KeyRound size={14} />
+          <span>Property Owner</span>
+          <span className="vp-role-pct">15% fee</span>
+        </button>
+      </div>
+
+      {/* Live Rent Slider Row */}
       <div className="vp-rent-slider-row">
         <div className="vp-slider-label">
-          <span>Monthly Rent:</span>
-          <strong>₹{rent.toLocaleString("en-IN")}</strong>
+          <span>Monthly Flat Rent</span>
+          <strong className="vp-slider-amount">₹{rent.toLocaleString("en-IN")}/mo</strong>
         </div>
         <input
           type="range"
@@ -165,49 +194,73 @@ export function BrokerageWidget() {
           className="vp-slider"
           aria-label="Monthly Rent Slider"
         />
-        <div className="vp-slider-range"><span>₹5K</span><span>₹80K</span></div>
+        <div className="vp-slider-range">
+          <span>₹5,000</span>
+          <span>₹40,000</span>
+          <span>₹80,000</span>
+        </div>
       </div>
 
+      {/* Side-by-Side Comparison Box */}
       <div className="vp-compare-grid">
+        {/* Traditional Brokerage Box */}
         <div className="vp-compare-col vp-compare-bad">
           <div className="vp-compare-label">
             <X size={14} />
-            Traditional
+            Traditional Broker
           </div>
           <div className="vp-compare-amount">₹{traditional.toLocaleString("en-IN")}</div>
-          <div className="vp-compare-sub">1 month rent from seeker</div>
+          <div className="vp-compare-sub">
+            {role === "seeker" ? "1 full month rent (100%)" : "1 full month demanded by brokers"}
+          </div>
           <AnimatedBar value={traditional} max={traditional} color="#dc2626" animate={animate} />
           <div className="vp-compare-breakdown">
-            <span>Seeker pays 100%</span>
-            <span>Owner pays 0%</span>
+            <span>You pay: 100% full rent</span>
+            <span>Zero privacy protection</span>
           </div>
         </div>
 
+        {/* Apna Aangan Box */}
         <div className="vp-compare-col vp-compare-good">
           <div className="vp-compare-label">
             <BadgeCheck size={14} />
-            Apna Aangan
+            Apna Aangan ({role === "seeker" ? "Seeker 50%" : "Owner 15%"})
           </div>
-          <div className="vp-compare-amount" style={{ color: "var(--brand-deep)" }}>₹{seekerFee.toLocaleString("en-IN")}</div>
-          <div className="vp-compare-sub">50% from seeker only</div>
-          <AnimatedBar value={seekerFee} max={traditional} color="var(--brand)" animate={animate} />
+          <div className="vp-compare-amount" style={{ color: "var(--brand-deep)" }}>
+            ₹{activeFee.toLocaleString("en-IN")}
+          </div>
+          <div className="vp-compare-sub">
+            {role === "seeker" ? "50% brokerage (zero advance cuts)" : "Only 15% nominal fee on lease closure"}
+          </div>
+          <AnimatedBar value={activeFee} max={traditional} color="var(--brand)" animate={animate} />
           <div className="vp-compare-breakdown">
-            <span style={{ color: "var(--brand)" }}>Seeker: 50% · ₹{seekerFee.toLocaleString("en-IN")}</span>
-            <span style={{ color: "var(--brand)" }}>Owner: 15% · ₹{ownerFee.toLocaleString("en-IN")}</span>
+            <span style={{ color: "var(--brand)" }}>
+              {role === "seeker"
+                ? `Seeker pays: 50% · ₹${seekerFee.toLocaleString("en-IN")}`
+                : `Owner pays: 15% · ₹${ownerFee.toLocaleString("en-IN")}`}
+            </span>
+            <span style={{ color: "var(--brand)" }}>Verified deal · 100% privacy</span>
           </div>
         </div>
       </div>
 
+      {/* Live Savings Highlight Banner */}
       <div className="vp-saving-banner">
         <span className="vp-saving-icon">🎉</span>
-        <div>
-          <strong>You save ₹{saving.toLocaleString("en-IN")}</strong>
-          <span> on brokerage vs traditional agents</span>
+        <div className="vp-saving-copy">
+          <strong>You save ₹{activeSaving.toLocaleString("en-IN")} ({activePctSaved} savings)</strong>
+          <span> as a {role === "seeker" ? "Home Seeker" : "Property Owner"} vs typical 1-month brokerage</span>
         </div>
+      </div>
+
+      {/* Transparent Model Footer */}
+      <div className="vp-breakdown-footer">
+        <span className="vp-model-pill">Seeker: 50% (₹{seekerFee.toLocaleString("en-IN")})</span>
+        <span className="vp-model-pill">Owner: 15% (₹{ownerFee.toLocaleString("en-IN")})</span>
       </div>
     </div>
   );
-}
+});
 
 /* ─────────── 3. Privacy Shield Widget ─────────── */
 const spamCalls = [
@@ -216,12 +269,11 @@ const spamCalls = [
   { name: "Random Agent", num: "+91 63XX XXXXX", blocked: true },
 ];
 
-export function PrivacyShieldWidget() {
-  const [step, setStep] = useState(3); // Default to showing blocked state for instant mobile reliability
+export const PrivacyShieldWidget = memo(function PrivacyShieldWidget() {
+  const [step, setStep] = useState(3);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // If IntersectionObserver is available, run a smooth staged simulation
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
 
@@ -252,7 +304,7 @@ export function PrivacyShieldWidget() {
           PRIVACY FIRST
         </span>
         <h3>Zero spam calls. <em>Always.</em></h3>
-        <p>Your number is never shared with brokers or callers. We handle connections privately.</p>
+        <p>Your direct contact is never published or handed to brokers. We coordinate visits privately.</p>
       </div>
 
       <div className="vp-shield-visual">
@@ -290,38 +342,38 @@ export function PrivacyShieldWidget() {
         <div className="vp-shield-right">
           <div className="vp-shield-title" style={{ color: "var(--brand)" }}>
             <BadgeCheck size={15} />
-            Only verified reach you
+            Only verified inquiries reach you
           </div>
           <div className={`vp-verified-inquiry ${step >= spamCalls.length ? "vp-verified-show" : ""}`}>
             <div className="vp-inquiry-header">
               <span className="vp-inquiry-badge">
-                <BadgeCheck size={14} /> Verified Inquiry
+                <BadgeCheck size={14} /> Verified Seeker Inquiry
               </span>
             </div>
             <div className="vp-inquiry-body">
-              <strong>Apna Aangan Team</strong>
-              <span>A verified home seeker is interested in your property. No contact exchange needed.</span>
+              <strong>Apna Aangan Concierge</strong>
+              <span>A verified family is requesting a weekend viewing. No number exchange required.</span>
             </div>
             <div className="vp-inquiry-footer">
-              <CheckCircle2 size={12} /> Identity verified · Zero spam
+              <CheckCircle2 size={12} /> ID Verified · Zero Lead Reselling
             </div>
           </div>
-          <p className="vp-shield-note">Your number stays private. Forever.</p>
+          <p className="vp-shield-note">Your personal number stays private. Forever.</p>
         </div>
       </div>
     </div>
   );
-}
+});
 
 /* ─────────── Combined Section ─────────── */
-export function ValuePropositions() {
+export const ValuePropositions = memo(function ValuePropositions() {
   return (
     <section className="vp-section section-pad">
       <div className="container">
         <div className="vp-section-head">
           <span className="eyebrow"><span className="eyebrow-line" /> WHY APNA AANGAN</span>
           <h2>Built differently. <em>For you.</em></h2>
-          <p>Three core promises that set us apart from every other rental platform.</p>
+          <p>Three core promises that set us apart from every traditional rental platform.</p>
         </div>
         <div className="vp-grid">
           <FlexibleStayWidget />
@@ -331,4 +383,4 @@ export function ValuePropositions() {
       </div>
     </section>
   );
-}
+});
