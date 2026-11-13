@@ -2124,7 +2124,7 @@ export function PostPropertyExperience() {
                 <span />
               )}
 
-              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <div className="post-footer-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                 {(!editId || editingStatus === "draft") && (
                   <button
                     type="button"

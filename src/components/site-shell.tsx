@@ -46,6 +46,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const [city, setCity] = useState("Bengaluru");
   const isAdmin = pathname.startsWith("/admin");
   const isPropertyDetail = pathname.startsWith("/property/");
+  const isPostProperty = pathname.startsWith("/post-property");
   const isAuth = ["/login", "/signup", "/setup", "/welcome"].includes(pathname);
 
   // Sticky header scroll listener & Back to top
@@ -257,15 +258,17 @@ export function SiteShell({ children }: { children: ReactNode }) {
       </div>
     </header>
     <div className="site-content page-transition-wrap" key={pathname}>{children}</div>
-    <button
-      type="button"
-      className={`back-to-top ${showBackToTop ? "visible" : ""}`}
-      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-      aria-label="Back to top"
-      title="Scroll back to top"
-    >
-      <ArrowUp size={20} strokeWidth={2.4} />
-    </button>
+    {!isPostProperty && (
+      <button
+        type="button"
+        className={`back-to-top ${showBackToTop ? "visible" : ""}`}
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        aria-label="Back to top"
+        title="Scroll back to top"
+      >
+        <ArrowUp size={20} strokeWidth={2.4} />
+      </button>
+    )}
     {!isAuth && <footer className="site-footer"><div className="container footer-grid">
       <div className="footer-about"><Brand light/><p>A more thoughtful way to find your place. Real homes, verified details, and a team that puts your privacy first.</p><span className="footer-trust"><ShieldCheck size={16}/> Your home search, handled with care.</span></div>
       <div className="footer-col"><h4>Explore</h4><Link href="/search">All rental homes</Link><Link href="/search?bhk=1">1 BHK Rentals</Link><Link href="/search?bhk=2">2 BHK Rentals</Link><Link href="/search?bhk=3">3 BHK Rentals</Link><Link href="/search?q=Villa">Villas & Houses</Link></div>

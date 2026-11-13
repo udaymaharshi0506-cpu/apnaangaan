@@ -460,7 +460,7 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
                 <span className="formal-tile-label">Availability</span>
                 <strong className="formal-tile-value">{property.availabilityDate ? new Date(property.availabilityDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "Ready to move"}</strong>
               </div>
-              <div className="formal-tile">
+              <div className="formal-tile formal-tile-wide">
                 <span className="formal-tile-label">Preferred Tenants</span>
                 <strong className="formal-tile-value">{property.tenantPreference || "Open to all (Families / Professionals)"}</strong>
               </div>

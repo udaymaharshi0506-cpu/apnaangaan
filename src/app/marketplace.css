@@ -670,6 +670,21 @@
     border-radius: 6px !important;
     flex-shrink: 0 !important;
   }
+  .detail-mobile-bar {
+    display: flex !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 70 !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    background: var(--surface) !important;
+    border-top: 1px solid var(--border) !important;
+    box-shadow: 0 -5px 18px rgba(0,0,0,.08) !important;
+    padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
 }
 
 /* Ensure mobile floating bar is strictly hidden on desktop */
@@ -1651,11 +1666,41 @@
     font-size: 14px !important;
   }
   .formal-box-grid {
-    grid-template-columns: 1fr !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
   .formal-tile {
     padding: 10px 12px !important;
+    border-radius: 9px !important;
+    background: var(--surface-soft) !important;
+    border: 1px solid var(--border) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 3px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .formal-tile.formal-tile-wide {
+    grid-column: 1 / -1 !important;
+  }
+  .formal-tile-label {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.6px !important;
+    text-transform: uppercase !important;
+    color: var(--muted) !important;
+  }
+  .formal-tile-value {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: var(--ink) !important;
+    line-height: 1.35 !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
   }
   .formal-landmark-card {
     padding: 14px 14px !important;
