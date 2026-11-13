@@ -50,11 +50,13 @@ import {
   UserCheck,
   Users,
   UsersRound,
+  Wallet,
   X,
   ZoomIn,
 } from "lucide-react";
 import { Brand } from "@/components/site-shell";
 import { apiFetch, useApp } from "@/components/providers";
+import { AdminRentalLedger } from "@/components/admin-rental-ledger";
 import { categoryLabel, formatPrice } from "@/lib/format";
 import { formatMeetingStatus, getMinVisitDateTimeLocal, validateVisitSlot } from "@/lib/scheduling";
 import type { AdminProperty, PublicProperty } from "@/lib/serializers";
@@ -2647,7 +2649,7 @@ function exportUsersToCSV(userList: AdminUser[]) {
 export function AdminDashboardExperience() {
   const router = useRouter();
   const { user, logout, toast } = useApp();
-  const [view, setView] = useState<"overview" | "requests" | "properties" | "moderation" | "leads" | "users">("overview");
+  const [view, setView] = useState<"overview" | "rental-ledger" | "requests" | "properties" | "moderation" | "leads" | "users">("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [leads, setLeads] = useState<AdminLead[]>([]);
   const [moderation, setModeration] = useState<ModeratedProperty[]>([]);
@@ -2978,6 +2980,11 @@ export function AdminDashboardExperience() {
           {[
             { value: "overview", label: "Overview", Icon: LayoutDashboard },
             {
+              value: "rental-ledger",
+              label: "Rental & Financial Ledger",
+              Icon: Wallet,
+            },
+            {
               value: "requests",
               label: "Owner Requests Queue",
               Icon: Sparkles,
@@ -3025,7 +3032,9 @@ export function AdminDashboardExperience() {
             Workspace <ChevronRight size={13} />{" "}
             <strong>
               {view === "overview"
-                ? "Overview"
+                ? "Overview & Analytics"
+                : view === "rental-ledger"
+                ? "Rental Operations & Financial Ledger"
                 : view === "requests"
                 ? "Owner Requests & Listings Queue"
                 : view === "properties"
@@ -3117,127 +3126,11 @@ export function AdminDashboardExperience() {
                 </div>
               </div>
 
-              {/* Executive Stat Cards */}
-              <div className="admin-stat-grid">
-                <div
-                  className="admin-stat-card card-purple"
-                  onClick={() => setView("requests")}
-                  role="button"
-                  tabIndex={0}
-                  style={{ background: "linear-gradient(135deg, rgba(124, 58, 237, 0.05) 0%, rgba(124, 58, 237, 0.12) 100%)", borderColor: "rgba(124, 58, 237, 0.35)" }}
-                >
-                  <div className="admin-stat-top">
-                    <span className="stat-icon purple">
-                      <Sparkles size={20} />
-                    </span>
-                    <span className="stat-badge purple-badge">
-                      {(stats?.newManagerRequestsCount || 0) > 0 ? `${stats?.newManagerRequestsCount} New Action` : "Managed Active"}
-                    </span>
-                  </div>
-                  <span className="stat-label">Owner Requests &amp; Listings</span>
-                  <strong className="stat-number">{stats?.managerRequestsCount || managerRequests.length || 0}</strong>
-                  <div className="stat-category-pills">
-                    <span>Standard ₹499</span> · <span>Premium ₹999 ⭐</span> · <span>Self-Listings</span>
-                  </div>
-                  <div className="stat-footer-link">
-                    <span>Open Requests Queue</span>
-                    <ChevronRight size={14} />
-                  </div>
-                </div>
-                <div
-                  className="admin-stat-card card-green"
-                  onClick={() => setView("properties")}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="admin-stat-top">
-                    <span className="stat-icon green">
-                      <Home size={20} />
-                    </span>
-                    <span className="stat-badge green-badge">100% Live</span>
-                  </div>
-                  <span className="stat-label">Live properties</span>
-                  <strong className="stat-number">{stats?.listingsByCategory.reduce((sum, item) => sum + item.total, 0) || totalListings}</strong>
-                  <div className="stat-category-pills">
-                    <span>12 Sale</span> · <span>11 Rent</span> · <span>11 PG</span> · <span>11 Comm</span>
-                  </div>
-                  <div className="stat-footer-link">
-                    <span>Explore full catalog</span>
-                    <ChevronRight size={14} />
-                  </div>
-                </div>
-
-                <div
-                  className="admin-stat-card card-orange"
-                  onClick={() => setView("leads")}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="admin-stat-top">
-                    <span className="stat-icon orange">
-                      <MessageSquare size={20} />
-                    </span>
-                    <span className="stat-badge orange-badge">Active Concierge</span>
-                  </div>
-                  <span className="stat-label">Total inquiries</span>
-                  <strong className="stat-number">{stats?.inquiryTotal || 0}</strong>
-                  <div className="stat-category-pills">
-                    <span>{stats?.inquiryTotal || 0} Active dossier</span> · <span>100% response rate</span>
-                  </div>
-                  <div className="stat-footer-link">
-                    <span>Open lead inbox</span>
-                    <ChevronRight size={14} />
-                  </div>
-                </div>
-
-                <div
-                  className="admin-stat-card card-purple"
-                  onClick={() => setView("users")}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="admin-stat-top">
-                    <span className="stat-icon purple">
-                      <UsersRound size={20} />
-                    </span>
-                    <span className="stat-badge purple-badge">Community</span>
-                  </div>
-                  <span className="stat-label">Registered Users</span>
-                  <strong className="stat-number">{stats?.totalUsers || totalUsers || 0}</strong>
-                  <div className="stat-category-pills">
-                    <span>{stats?.seekerCount || 2} Seekers</span> · <span>{stats?.ownerCount || 3} Owners</span> · <span>Team</span>
-                  </div>
-                  <div className="stat-footer-link">
-                    <span>Inspect user accounts</span>
-                    <ChevronRight size={14} />
-                  </div>
-                </div>
-
-                <div
-                  className="admin-stat-card card-blue"
-                  onClick={() => setView("moderation")}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="admin-stat-top">
-                    <span className="stat-icon blue">
-                      <BadgeCheck size={20} />
-                    </span>
-                    <span className={`stat-badge ${pending > 0 ? "orange-badge" : "green-badge"}`}>
-                      {pending > 0 ? `${pending} Pending` : "All Verified"}
-                    </span>
-                  </div>
-                  <span className="stat-label">Awaiting review</span>
-                  <strong className="stat-number">{pending}</strong>
-                  <div className="stat-category-pills">
-                    <span>{pending === 0 ? "Zero backlog · Auto-audited" : "Requires moderation review"}</span>
-                  </div>
-                  <div className="stat-footer-link">
-                    <span>Review queue</span>
-                    <ChevronRight size={14} />
-                  </div>
-                </div>
-              </div>
+              {/* Primary Rental Operations, KPI Telemetry & Financial Ledger */}
+              <AdminRentalLedger
+                onOpenRequestsQueue={() => setView("requests")}
+                onOpenModerationQueue={() => setView("moderation")}
+              />
 
               {/* 2 Charts Grid */}
               <div className="admin-overview-grid">
@@ -3388,6 +3281,14 @@ export function AdminDashboardExperience() {
                 )}
               </div>
             </>
+          )}
+
+          {/* VIEW: RENTAL OPERATIONS & FINANCIAL LEDGER */}
+          {view === "rental-ledger" && (
+            <AdminRentalLedger
+              onOpenRequestsQueue={() => setView("requests")}
+              onOpenModerationQueue={() => setView("moderation")}
+            />
           )}
 
           {/* VIEW: OWNER REQUESTS & LISTINGS QUEUE */}

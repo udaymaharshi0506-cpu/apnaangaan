@@ -22,8 +22,10 @@ export type PublicPropertyInput = Omit<
   | "requestStatus"
   | "assignedManagerId"
   | "assignedManagerName"
+  | "rentalStatus"
+  | "monthlyRent"
 > &
-  Partial<Pick<Property, "ownerId" | "address" | "status" | "updatedAt" | "listingMode" | "managedTier" | "isRecommended">>;
+  Partial<Pick<Property, "ownerId" | "address" | "status" | "updatedAt" | "listingMode" | "managedTier" | "isRecommended" | "rentalStatus" | "monthlyRent">>;
 
 export type CustomerLeadInput = Pick<
   Lead,

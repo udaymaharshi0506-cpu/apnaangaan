@@ -89,6 +89,9 @@ export const properties = pgTable("properties", {
   requestStatus: varchar("request_status", { length: 30 }).notNull().default("new"),
   assignedManagerId: uuid("assigned_manager_id").references(() => users.id),
   assignedManagerName: varchar("assigned_manager_name", { length: 150 }),
+  // Rental & Ledger tracking
+  rentalStatus: varchar("rental_status", { length: 30 }).notNull().default("available_pending"),
+  monthlyRent: bigint("monthly_rent", { mode: "number" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("properties_category_idx").on(table.category), index("properties_city_idx").on(table.city), index("properties_status_idx").on(table.status), index("properties_created_idx").on(table.createdAt)]);
@@ -256,6 +259,63 @@ export const managerRequests = pgTable("manager_requests", {
   index("manager_requests_created_idx").on(table.createdAt),
 ]);
 
+export const rentalDeals = pgTable("rental_deals", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dealCode: varchar("deal_code", { length: 50 }).unique(),
+  propertyId: uuid("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+  ownerId: uuid("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  seekerId: uuid("seeker_id").references(() => users.id, { onDelete: "set null" }),
+  seekerName: varchar("seeker_name", { length: 150 }),
+  seekerPhone: varchar("seeker_phone", { length: 25 }),
+  seekerEmail: varchar("seeker_email", { length: 255 }),
+  leaseStartDate: timestamp("lease_start_date", { withTimezone: true }),
+  leaseEndDate: timestamp("lease_end_date", { withTimezone: true }),
+  monthlyRent: bigint("monthly_rent", { mode: "number" }).notNull().default(0),
+  stayDurationMonths: integer("stay_duration_months").default(11),
+  securityDepositTotal: numeric("security_deposit_total", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  securityDepositCollected: numeric("security_deposit_collected", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  ownerFeeTotal: numeric("owner_fee_total", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  ownerFeeCollected: numeric("owner_fee_collected", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  seekerFeeTotal: numeric("seeker_fee_total", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  seekerFeeCollected: numeric("seeker_fee_collected", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  dealStatus: varchar("deal_status", { length: 30 }).notNull().default("in_progress"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("rental_deals_property_idx").on(table.propertyId),
+  index("rental_deals_owner_idx").on(table.ownerId),
+  index("rental_deals_status_idx").on(table.dealStatus),
+  index("rental_deals_created_idx").on(table.createdAt),
+]);
+
+export const transactionsLedger = pgTable("transactions_ledger", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  txnCode: varchar("txn_code", { length: 50 }).unique(),
+  dealId: uuid("deal_id").references(() => rentalDeals.id, { onDelete: "set null" }),
+  propertyId: uuid("property_id").references(() => properties.id, { onDelete: "set null" }),
+  payerType: varchar("payer_type", { length: 20 }).notNull().default("seeker"),
+  payerId: uuid("payer_id").references(() => users.id, { onDelete: "set null" }),
+  payerName: varchar("payer_name", { length: 150 }),
+  category: varchar("category", { length: 40 }).notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  direction: varchar("direction", { length: 10 }).notNull().default("credit"),
+  paymentMode: varchar("payment_mode", { length: 30 }).notNull().default("upi"),
+  referenceId: varchar("reference_id", { length: 120 }),
+  status: varchar("status", { length: 20 }).notNull().default("settled"),
+  reconciliationStatus: varchar("reconciliation_status", { length: 20 }).notNull().default("reconciled"),
+  notes: text("notes"),
+  recordedByAdminId: uuid("recorded_by_admin_id").references(() => users.id, { onDelete: "set null" }),
+  recordedByAdminName: varchar("recorded_by_admin_name", { length: 150 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("transactions_ledger_deal_idx").on(table.dealId),
+  index("transactions_ledger_property_idx").on(table.propertyId),
+  index("transactions_ledger_category_idx").on(table.category),
+  index("transactions_ledger_status_idx").on(table.status),
+  index("transactions_ledger_created_idx").on(table.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
 export type ManagerRequest = typeof managerRequests.$inferSelect;
@@ -263,4 +323,6 @@ export type Lead = typeof leads.$inferSelect;
 export type OwnerInquiry = typeof ownerInquiryView.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;
 export type UploadedImage = typeof uploadedImages.$inferSelect;
+export type RentalDeal = typeof rentalDeals.$inferSelect;
+export type TransactionLedger = typeof transactionsLedger.$inferSelect;
 
