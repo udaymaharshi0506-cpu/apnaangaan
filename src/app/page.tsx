@@ -3,6 +3,7 @@ import { ArrowRight, ArrowUpRight, BadgeCheck, Check, HeartHandshake, KeyRound, 
 import { HeroSearch } from "@/components/search-controls";
 import { FeaturedListings, RecentlyViewed } from "@/components/home-sections";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { ValuePropositions } from "@/components/value-propositions";
 import { findProperties, getTopNeighborhoods } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +68,10 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+    </ScrollReveal>
+
+    <ScrollReveal>
+      <ValuePropositions />
     </ScrollReveal>
 
     <ScrollReveal>

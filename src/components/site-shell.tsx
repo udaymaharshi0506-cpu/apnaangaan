@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles, ArrowUp } from "lucide-react";
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useState, useRef, Suspense, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
+import { RouteProgress } from "@/components/route-progress";
 
 function formatRelativeTime(dateString: string) {
   try {
@@ -89,7 +90,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
 
-  if (isAdmin) return <>{children}</>;
+  if (isAdmin) return <><Suspense fallback={null}><RouteProgress /></Suspense>{children}</>;
 
   const isUserAdmin = !!user && user.roles.includes("admin");
   const isUserOwner = !!user && !isUserAdmin && user.roles.includes("owner");
@@ -124,6 +125,9 @@ export function SiteShell({ children }: { children: ReactNode }) {
   ];
 
   return <>
+    <Suspense fallback={null}>
+      <RouteProgress />
+    </Suspense>
     <header className={`site-header ${isScrolled ? "scrolled" : ""}`}>
       <div className="nav-container">
         <Brand />
