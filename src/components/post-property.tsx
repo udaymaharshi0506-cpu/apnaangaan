@@ -329,7 +329,6 @@ export function PostPropertyExperience() {
     city: "Bengaluru",
     ownerContactPhone: "",
     notes: "",
-    paymentMethod: "upi",
   });
 
   const submitLockRef = useRef(false);
@@ -1119,7 +1118,7 @@ export function PostPropertyExperience() {
                       setShowCheckoutModal(true);
                     }}
                   >
-                    Continue with Standard — ₹499
+                    Submit Request
                   </button>
                 </div>
               </div>
@@ -1171,7 +1170,7 @@ export function PostPropertyExperience() {
                       setShowCheckoutModal(true);
                     }}
                   >
-                    Continue with Premium — ₹999
+                    Submit Request
                   </button>
                 </div>
               </div>
@@ -2263,35 +2262,6 @@ export function PostPropertyExperience() {
                   />
                 </div>
 
-                <div>
-                  <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
-                    Select Payment Method
-                  </label>
-                  <div className="payment-method-selector">
-                    <button
-                      type="button"
-                      className={`pm-option ${managedForm.paymentMethod === "upi" ? "active" : ""}`}
-                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "upi" })}
-                    >
-                      📱 UPI / GPay
-                    </button>
-                    <button
-                      type="button"
-                      className={`pm-option ${managedForm.paymentMethod === "card" ? "active" : ""}`}
-                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "card" })}
-                    >
-                      💳 Card
-                    </button>
-                    <button
-                      type="button"
-                      className={`pm-option ${managedForm.paymentMethod === "netbanking" ? "active" : ""}`}
-                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "netbanking" })}
-                    >
-                      🏦 NetBanking
-                    </button>
-                  </div>
-                </div>
-
                 <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
                   <button
                     type="button"
@@ -2308,7 +2278,7 @@ export function PostPropertyExperience() {
                     style={{ flex: 2, fontWeight: 800 }}
                     disabled={submittingManagerRequest}
                   >
-                    {submittingManagerRequest ? "Processing..." : `Pay ₹${selectedTier === "premium" ? "999" : "499"} & Submit Request`}
+                    {submittingManagerRequest ? "Submitting..." : "Submit Request"}
                   </button>
                 </div>
               </div>
