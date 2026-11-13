@@ -158,7 +158,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
           type="button"
           role="tab"
           aria-selected={role === "seeker"}
-          className={`vp-role-btn ${role === "seeker" ? "active" : ""}`}
+          className={`vp-role-btn ${role === "seeker" ? "vp-role-active active" : ""}`}
           onClick={() => setRole("seeker")}
         >
           <UserCheck size={14} />
@@ -169,7 +169,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
           type="button"
           role="tab"
           aria-selected={role === "owner"}
-          className={`vp-role-btn ${role === "owner" ? "active" : ""}`}
+          className={`vp-role-btn ${role === "owner" ? "vp-role-active active" : ""}`}
           onClick={() => setRole("owner")}
         >
           <KeyRound size={14} />
@@ -199,6 +199,18 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
           <span>₹40,000</span>
           <span>₹80,000</span>
         </div>
+        <div className="vp-preset-chips" aria-label="Quick rent presets">
+          {[15000, 25000, 35000, 50000].map((val) => (
+            <button
+              key={val}
+              type="button"
+              className={`vp-preset-chip ${rent === val ? "active" : ""}`}
+              onClick={() => setRent(val)}
+            >
+              ₹{(val / 1000)}k
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Side-by-Side Comparison Box */}
@@ -207,15 +219,15 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
         <div className="vp-compare-col vp-compare-bad">
           <div className="vp-compare-label">
             <X size={14} />
-            Traditional Broker
+            Traditional Broker (100%)
           </div>
           <div className="vp-compare-amount">₹{traditional.toLocaleString("en-IN")}</div>
           <div className="vp-compare-sub">
-            {role === "seeker" ? "1 full month rent (100%)" : "1 full month demanded by brokers"}
+            {role === "seeker" ? "Demands 1 full month rent (100%)" : "Demands 1 full month from owner"}
           </div>
           <AnimatedBar value={traditional} max={traditional} color="#dc2626" animate={animate} />
           <div className="vp-compare-breakdown">
-            <span>You pay: 100% full rent</span>
+            <span>You pay: 100% full month rent</span>
             <span>Zero privacy protection</span>
           </div>
         </div>
@@ -237,9 +249,9 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
             <span style={{ color: "var(--brand)" }}>
               {role === "seeker"
                 ? `Seeker pays: 50% · ₹${seekerFee.toLocaleString("en-IN")}`
-                : `Owner pays: 15% · ₹${ownerFee.toLocaleString("en-IN")}`}
+                : `Owner pays: strictly 15% · ₹${ownerFee.toLocaleString("en-IN")}`}
             </span>
-            <span style={{ color: "var(--brand)" }}>Verified deal · 100% privacy</span>
+            <span style={{ color: "var(--brand)" }}>Verified deal · Zero spam calls</span>
           </div>
         </div>
       </div>
@@ -248,7 +260,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
       <div className="vp-saving-banner">
         <span className="vp-saving-icon">🎉</span>
         <div className="vp-saving-copy">
-          <strong>You save ₹{activeSaving.toLocaleString("en-IN")} ({activePctSaved} savings)</strong>
+          <strong>You save ₹{activeSaving.toLocaleString("en-IN")} ({activePctSaved} saved)</strong>
           <span> as a {role === "seeker" ? "Home Seeker" : "Property Owner"} vs typical 1-month brokerage</span>
         </div>
       </div>
