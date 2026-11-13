@@ -63,3 +63,4 @@ CREATE TABLE IF NOT EXISTS `transactions_ledger` (
   INDEX `idx_txn_status` (`status`),
   INDEX `idx_txn_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

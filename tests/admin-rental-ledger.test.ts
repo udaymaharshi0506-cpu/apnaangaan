@@ -74,3 +74,4 @@ test("Transaction ledger running balance calculation", () => {
   assert.equal(computed[3].runningBalance, 90000); // pending txn doesn't affect settled balance
   assert.equal(balance, 90000);
 });
+

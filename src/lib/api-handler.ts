@@ -2594,11 +2594,11 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     if (route === "admin/dashboard/stats" && method === "GET") {
       const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], [{ totalUsers }], [{ totalOwners }], [{ seekerCount }], [{ totalManagerRequests }], [{ newManagerRequests }], recent] = await Promise.all([
-        db.select({ category: properties.category, total: count() }).from(properties).where(and(eq(properties.status, "live"), eq(properties.category, "rent_home"))).groupBy(properties.category),
+        db.select({ category: properties.category, total: count() }).from(properties).where(and(or(eq(properties.status, "live"), eq(properties.status, "rented")), eq(properties.category, "rent_home"))).groupBy(properties.category),
         db.select({ status: leads.status, total: count() }).from(leads).groupBy(leads.status),
         db.select({ total: count() }).from(leads),
         db.select({ pending: count() }).from(properties).where(and(eq(properties.status, "pending_review"), eq(properties.category, "rent_home"))),
-        db.select({ totalAll: count() }).from(properties).where(eq(properties.category, "rent_home")),
+        db.select({ totalAll: count() }).from(properties).where(and(eq(properties.category, "rent_home"), ne(properties.status, "rejected"))),
         db.select({ totalUsers: count() }).from(users),
         db.select({ totalOwners: count() }).from(users).where(and(sql`${users.roles}::jsonb ? 'owner'`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
         db.select({ seekerCount: count() }).from(users).where(and(sql`NOT (${users.roles}::jsonb ? 'owner')`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
@@ -2627,114 +2627,147 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
 
     if (route === "admin/dashboard-summary" && method === "GET") {
-      const [allProps, allDeals, allTxns, allMgr] = await Promise.all([
+      const [allProps, allDeals, allTxns] = await Promise.all([
         db.select().from(properties),
         db.select().from(rentalDeals).orderBy(desc(rentalDeals.createdAt)),
         db.select().from(transactionsLedger).orderBy(desc(transactionsLedger.createdAt)),
-        db.select().from(managerRequests),
       ]);
 
-      const totalFlats = allProps.length;
-      const rentedFlats = allProps.filter((p) => p.rentalStatus === "rented").length;
-      const availableFlats = allProps.filter((p) => p.rentalStatus === "available_pending").length;
-      const dealInProgressFlats = allProps.filter((p) => p.rentalStatus === "deal_in_progress").length;
-      const pendingAvailable = availableFlats + dealInProgressFlats;
-      const underReview = allProps.filter((p) => p.status === "pending_review" || !p.verified).length;
+      const propMap = new Map(allProps.map((p) => [p.id, p]));
+
+      // 1. Strict Property Counting Rule: Exclude Rejected Listings Everywhere
+      // Only count properties that are actively live/listed or rented
+      const liveProps = allProps.filter((p) => p.status !== "rejected" && p.rentalStatus !== "inactive");
+
+      const rentedFlats = liveProps.filter((p) => p.rentalStatus === "rented" || p.status === "rented").length;
+      const pendingFlats = liveProps.filter(
+        (p) =>
+          (p.rentalStatus === "available_pending" || p.rentalStatus === "deal_in_progress" || p.status === "live") &&
+          p.rentalStatus !== "rented" &&
+          p.status !== "rented"
+      ).length;
+
+      // Strict Live Inventory Check: total_live_flats === rented_flats + pending_flats
+      const totalFlats = rentedFlats + pendingFlats;
+      const availableOnly = liveProps.filter(
+        (p) => p.rentalStatus === "available_pending" && p.status !== "rented"
+      ).length;
+      const dealInProgressOnly = liveProps.filter(
+        (p) => p.rentalStatus === "deal_in_progress" && p.status !== "rented"
+      ).length;
+      const underReview = liveProps.filter((p) => p.status === "pending_review" || !p.verified).length;
       const occupancyRate = totalFlats > 0 ? Math.round((rentedFlats / totalFlats) * 100) : 0;
 
-      // Revenue and Money in Account
-      const settledTxns = allTxns.filter((t) => t.status === "settled");
+      // 2. Rule B — Closed Deals Only in Deposit & Brokerage Collection Tracker:
+      // A flat's brokerage and security deposit enter tracking ONLY when the deal is Closed / Rented
+      // (deal_status = 'closed' OR 'active_rented' AND property status = 'rented') on non-rejected property.
+      const closedDeals = allDeals.filter((d) => {
+        const p = propMap.get(d.propertyId);
+        if (!p || p.status === "rejected" || p.rentalStatus === "inactive") return false;
+        const isClosed = d.dealStatus === "closed" || d.dealStatus === "active_rented";
+        const isRented = p.rentalStatus === "rented" || p.status === "rented";
+        return isClosed && isRented;
+      });
+
+      // Security Deposit Overview (Closed Deals Only)
+      const totalExpectedDeposit = closedDeals.reduce((sum, d) => sum + Number(d.securityDepositTotal || 0), 0);
+      const collectedDeposit = closedDeals.reduce((sum, d) => sum + Number(d.securityDepositCollected || 0), 0);
+      const remainingDeposit = Math.max(0, totalExpectedDeposit - collectedDeposit);
+
+      // Brokerage Fees (Closed Deals Only)
+      const ownerExpected = closedDeals.reduce((sum, d) => sum + Number(d.ownerFeeTotal || 0), 0);
+      const ownerCollected = closedDeals.reduce((sum, d) => sum + Number(d.ownerFeeCollected || 0), 0);
+      const pendingFromOwners = Math.max(0, ownerExpected - ownerCollected);
+
+      const seekerExpected = closedDeals.reduce((sum, d) => sum + Number(d.seekerFeeTotal || 0), 0);
+      const seekerCollected = closedDeals.reduce((sum, d) => sum + Number(d.seekerFeeCollected || 0), 0);
+      const pendingFromSeekers = Math.max(0, seekerExpected - seekerCollected);
+
+      const totalPendingFees = pendingFromOwners + pendingFromSeekers;
+
+      // 3. Rule C & Revenue Recognition:
+      // Only settled transactions linked to valid (non-rejected) properties count toward revenue and account balance.
+      const validSettledTxns = allTxns.filter((t) => {
+        if (t.status !== "settled") return false;
+        if (t.propertyId) {
+          const p = propMap.get(t.propertyId);
+          if (p && (p.status === "rejected" || p.rentalStatus === "inactive")) return false;
+        }
+        if (t.dealId) {
+          const d = allDeals.find((deal) => deal.id === t.dealId);
+          if (d) {
+            const p = propMap.get(d.propertyId);
+            if (p && (p.status === "rejected" || p.rentalStatus === "inactive")) return false;
+          }
+        }
+        return true;
+      });
+
       const currentMonthPrefix = new Date().toISOString().slice(0, 7);
 
-      const ownerFeesAllTime = settledTxns
+      // Total Revenue = SUM(amount) WHERE status = 'settled' AND category IN ('owner_brokerage', 'seeker_brokerage', 'managed_listing_fee')
+      const ownerFeesAllTime = validSettledTxns
         .filter((t) => t.category === "owner_brokerage" && t.direction === "credit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const seekerFeesAllTime = settledTxns
+      const seekerFeesAllTime = validSettledTxns
         .filter((t) => t.category === "seeker_brokerage" && t.direction === "credit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      
-      const managedListingFeesAllTime =
-        settledTxns
-          .filter((t) => t.category === "managed_listing_fee" && t.direction === "credit")
-          .reduce((sum, t) => sum + Number(t.amount || 0), 0) +
-        allMgr
-          .filter((m) => m.paymentStatus === "paid")
-          .reduce((sum, m) => sum + Number(m.feeAmount || 0), 0);
+      const managedListingFeesAllTime = validSettledTxns
+        .filter((t) => t.category === "managed_listing_fee" && t.direction === "credit")
+        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
       const totalRevenueAllTime = ownerFeesAllTime + seekerFeesAllTime + managedListingFeesAllTime;
 
-      // This month revenue
-      const settledThisMonth = settledTxns.filter(
+      // This Month Revenue
+      const thisMonthTxns = validSettledTxns.filter(
         (t) => t.createdAt.toISOString().slice(0, 7) === currentMonthPrefix
       );
-      const ownerFeesMonth = settledThisMonth
+      const ownerFeesMonth = thisMonthTxns
         .filter((t) => t.category === "owner_brokerage" && t.direction === "credit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const seekerFeesMonth = settledThisMonth
+      const seekerFeesMonth = thisMonthTxns
         .filter((t) => t.category === "seeker_brokerage" && t.direction === "credit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const managedFeesMonth =
-        settledThisMonth
-          .filter((t) => t.category === "managed_listing_fee" && t.direction === "credit")
-          .reduce((sum, t) => sum + Number(t.amount || 0), 0) +
-        allMgr
-          .filter((m) => m.paymentStatus === "paid" && m.createdAt.toISOString().slice(0, 7) === currentMonthPrefix)
-          .reduce((sum, m) => sum + Number(m.feeAmount || 0), 0);
+      const managedFeesMonth = thisMonthTxns
+        .filter((t) => t.category === "managed_listing_fee" && t.direction === "credit")
+        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
       const totalRevenueThisMonth = ownerFeesMonth + seekerFeesMonth + managedFeesMonth;
 
-      // Net Account Balance (All settled credits - debits)
-      const totalSettledCredits = settledTxns
+      // Money in Our Account (Net Settled) = SUM(CASE WHEN direction = 'credit' THEN amount ELSE -amount END) WHERE status = 'settled'
+      const totalSettledCredits = validSettledTxns
         .filter((t) => t.direction === "credit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const totalSettledDebits = settledTxns
+      const totalSettledDebits = validSettledTxns
         .filter((t) => t.direction === "debit")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
       const netAccountBalance = totalSettledCredits - totalSettledDebits;
 
-      // Security Deposit Overview
-      const totalExpectedDeposit = allDeals.reduce((sum, d) => sum + Number(d.securityDepositTotal || 0), 0);
-      const collectedDeposit = allDeals.reduce((sum, d) => sum + Number(d.securityDepositCollected || 0), 0);
-      const remainingDeposit = Math.max(0, totalExpectedDeposit - collectedDeposit);
-
-      // Pending Brokerage / Fees
-      const pendingFromOwners = allDeals.reduce(
-        (sum, d) => sum + Math.max(0, Number(d.ownerFeeTotal || 0) - Number(d.ownerFeeCollected || 0)),
-        0
-      );
-      const pendingFromSeekers = allDeals.reduce(
-        (sum, d) => sum + Math.max(0, Number(d.seekerFeeTotal || 0) - Number(d.seekerFeeCollected || 0)),
-        0
-      );
-      const totalPendingFees = pendingFromOwners + pendingFromSeekers;
-
-      // Groupings for Tab 1 Analytics
-      // 1. By Locality
+      // Groupings for Tab 1 Analytics (strictly over non-rejected liveProps & closedDeals)
       const localityMap = new Map<string, { locality: string; rented: number; pending: number; total: number }>();
-      allProps.forEach((p) => {
+      liveProps.forEach((p) => {
         const loc = p.locality || "Unknown";
         const cur = localityMap.get(loc) || { locality: loc, rented: 0, pending: 0, total: 0 };
         cur.total += 1;
-        if (p.rentalStatus === "rented") cur.rented += 1;
+        if (p.rentalStatus === "rented" || p.status === "rented") cur.rented += 1;
         else cur.pending += 1;
         localityMap.set(loc, cur);
       });
       const byLocality = Array.from(localityMap.values()).sort((a, b) => b.total - a.total);
 
-      // 2. By Property Type
       const typeMap = new Map<string, { type: string; rented: number; pending: number; total: number }>();
-      allProps.forEach((p) => {
+      liveProps.forEach((p) => {
         const t = p.propertyType || "Apartment";
         const cur = typeMap.get(t) || { type: t, rented: 0, pending: 0, total: 0 };
         cur.total += 1;
-        if (p.rentalStatus === "rented") cur.rented += 1;
+        if (p.rentalStatus === "rented" || p.status === "rented") cur.rented += 1;
         else cur.pending += 1;
         typeMap.set(t, cur);
       });
       const byPropertyType = Array.from(typeMap.values()).sort((a, b) => b.total - a.total);
 
-      // 3. By Stay Duration
       const durationMap = new Map<string, { duration: string; dealsCount: number; totalRent: number }>();
-      allDeals.forEach((d) => {
+      closedDeals.forEach((d) => {
         const dur = `${d.stayDurationMonths || 11} Months`;
         const cur = durationMap.get(dur) || { duration: dur, dealsCount: 0, totalRent: 0 };
         cur.dealsCount += 1;
@@ -2742,12 +2775,6 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         durationMap.set(dur, cur);
       });
       const byStayDuration = Array.from(durationMap.values());
-
-      // 4. Cash Flow Summary
-      const ownerExpected = allDeals.reduce((sum, d) => sum + Number(d.ownerFeeTotal || 0), 0);
-      const ownerCollected = allDeals.reduce((sum, d) => sum + Number(d.ownerFeeCollected || 0), 0);
-      const seekerExpected = allDeals.reduce((sum, d) => sum + Number(d.seekerFeeTotal || 0), 0);
-      const seekerCollected = allDeals.reduce((sum, d) => sum + Number(d.seekerFeeCollected || 0), 0);
 
       const cashflowSummary = {
         securityDeposit: {
@@ -2788,7 +2815,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           totalFlatsListed: {
             total: totalFlats,
             rented: rentedFlats,
-            availablePending: pendingAvailable,
+            availablePending: pendingFlats,
             underReview,
           },
           flatsCurrentlyRented: {
@@ -2796,9 +2823,9 @@ async function handle(request: NextRequest, method: string, segments: string[]):
             occupancyRate,
           },
           flatsPendingAvailable: {
-            count: pendingAvailable,
-            available: availableFlats,
-            dealInProgress: dealInProgressFlats,
+            count: pendingFlats,
+            available: availableOnly,
+            dealInProgress: dealInProgressOnly,
           },
           totalRevenue: {
             allTime: totalRevenueAllTime,
@@ -2854,12 +2881,17 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         db.select({ id: users.id, name: users.name, phone: users.phone, email: users.email }).from(users),
       ]);
 
-      const propMap = new Map(propsList.map((p) => [p.id, p]));
+      // Strict exclusion of rejected properties everywhere
+      const liveProps = propsList.filter((p) => p.status !== "rejected" && p.rentalStatus !== "inactive");
+      const livePropMap = new Map(liveProps.map((p) => [p.id, p]));
       const userMap = new Map(usersList.map((u) => [u.id, u]));
 
+      // Only deals linked to valid live properties
+      const validDeals = dealsList.filter((d) => livePropMap.has(d.propertyId));
+
       // Enrich deals
-      let enrichedDeals = dealsList.map((deal) => {
-        const prop = propMap.get(deal.propertyId);
+      let enrichedDeals = validDeals.map((deal) => {
+        const prop = livePropMap.get(deal.propertyId);
         const owner = userMap.get(deal.ownerId);
 
         const depTotal = Number(deal.securityDepositTotal || 0);
@@ -2966,17 +2998,16 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         enrichedDeals = enrichedDeals.filter((d) => d.securityDeposit.status === depositStatusFilter);
       }
 
-      // Flat Inventory View
-      const activeDealMap = new Map(dealsList.filter((d) => d.dealStatus === "active_rented").map((d) => [d.propertyId, d]));
-      const inventory = propsList.map((p) => {
+      // Flat Inventory View (Strictly non-rejected liveProps)
+      const activeDealMap = new Map(validDeals.filter((d) => d.dealStatus === "closed" || d.dealStatus === "active_rented").map((d) => [d.propertyId, d]));
+      const inventory = liveProps.map((p) => {
         const owner = userMap.get(p.ownerId);
         const activeDeal = activeDealMap.get(p.id);
 
         let rentalStatusLabel = "Pending (Available to Rent)";
-        if (p.rentalStatus === "rented") rentalStatusLabel = "Rented (Active)";
+        if (p.rentalStatus === "rented" || p.status === "rented") rentalStatusLabel = "Rented (Active)";
         else if (p.rentalStatus === "deal_in_progress") rentalStatusLabel = "Deal In Progress";
         else if (p.status === "pending_review" || !p.verified) rentalStatusLabel = "Verification Pending";
-        else if (p.rentalStatus === "inactive" || p.status === "rejected") rentalStatusLabel = "Inactive";
 
         const daysVacant = Math.max(1, Math.round((Date.now() - new Date(p.createdAt).getTime()) / (1000 * 60 * 60 * 24)));
 
@@ -3008,8 +3039,18 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         };
       });
 
-      // Compute Running Account Balance on Transactions
-      const sortedAscTxns = [...txnsList].sort(
+      // Filter transactions: exclude any tied to rejected properties
+      const validTxns = txnsList.filter((t) => {
+        if (t.propertyId && !livePropMap.has(t.propertyId)) return false;
+        if (t.dealId) {
+          const d = dealsList.find((deal) => deal.id === t.dealId);
+          if (d && !livePropMap.has(d.propertyId)) return false;
+        }
+        return true;
+      });
+
+      // Compute Running Account Balance on Valid Transactions
+      const sortedAscTxns = [...validTxns].sort(
         (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
       let runningBalance = 0;

@@ -710,10 +710,10 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
         >
           <div className="kpi-card-top">
             <span className="kpi-icon-wrap emerald"><Building2 size={20} /></span>
-            <span className="kpi-badge emerald-badge">100% Verified</span>
+            <span className="kpi-badge emerald-badge">Live Inventory</span>
           </div>
           <span className="kpi-label">1. Total Flats Listed</span>
-          <strong className="kpi-number">{kpis?.totalFlatsListed.total ?? inventory.length}</strong>
+          <strong className="kpi-number">{kpis?.totalFlatsListed.total ?? 0}</strong>
           <div className="kpi-sub-breakdown">
             <span className="pill-rented">{kpis?.totalFlatsListed.rented || 0} Rented</span>
             <span>·</span>
@@ -1930,3 +1930,4 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
     </div>
   );
 }
+
