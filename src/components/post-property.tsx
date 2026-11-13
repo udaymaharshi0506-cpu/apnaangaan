@@ -47,6 +47,7 @@ import {
   BHK_OPTIONS_BY_VERTICAL,
   LISTING_LIMITS,
   MAX_LISTING_IMAGES,
+  normalizeFromAllowlist,
   PROPERTY_TYPES_BY_VERTICAL,
   validateVerticalRules,
 } from "@/lib/listing-validation";
@@ -64,7 +65,12 @@ const categories = [
   { value: "rent_home", label: "Rent out a home", description: "Apartment, villa, independent house or floor", icon: KeyRound },
 ];
 
-const propertyTypesByCategory: Record<string, readonly string[]> = PROPERTY_TYPES_BY_VERTICAL;
+const propertyTypesByCategory: Record<string, readonly string[]> = {
+  ...PROPERTY_TYPES_BY_VERTICAL,
+  buy_home: PROPERTY_TYPES_BY_VERTICAL.rent_home,
+  rent_pg: PROPERTY_TYPES_BY_VERTICAL.rent_home,
+  commercial: PROPERTY_TYPES_BY_VERTICAL.rent_home,
+};
 const bhkOptions = [...BHK_OPTIONS_BY_VERTICAL.rent_home];
 const facingOptions = ["East", "North", "North-East", "South", "West", "North-West", "South-East", "South-West"];
 const propertyAgeOptions = ["New / Under Construction", "0–1 Year", "1–5 Years", "5–10 Years", "10+ Years"];
@@ -306,6 +312,26 @@ export function PostPropertyExperience() {
   const [error, setError] = useState("");
   const [pinStatus, setPinStatus] = useState<string | null>(null);
 
+  // Managed Service & Listing Mode States
+  const [listingFlowMode, setListingFlowMode] = useState<"choose_mode" | "choose_tier" | "self_form" | "managed_success">("choose_mode");
+  const [selectedTier, setSelectedTier] = useState<"standard" | "premium">("premium");
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [submittingManagerRequest, setSubmittingManagerRequest] = useState(false);
+  const [managedSuccessData, setManagedSuccessData] = useState<{
+    id: string;
+    transactionId: string;
+    tier: "standard" | "premium";
+    fee: string;
+  } | null>(null);
+  const [managedForm, setManagedForm] = useState({
+    propertyTitle: "",
+    locality: "",
+    city: "Bengaluru",
+    ownerContactPhone: "",
+    notes: "",
+    paymentMethod: "upi",
+  });
+
   const submitLockRef = useRef(false);
   const selfieInputRef = useRef<HTMLInputElement>(null);
   const aadhaarInputRef = useRef<HTMLInputElement>(null);
@@ -320,13 +346,21 @@ export function PostPropertyExperience() {
         ownerName: prev.ownerName || user.name || "",
         city: prev.city || user.location || user.city || "Bengaluru",
       }));
+      setManagedForm((prev) => ({
+        ...prev,
+        ownerContactPhone: prev.ownerContactPhone || (user.phone ? extractIndianPhoneDigits(user.phone) : ""),
+        city: prev.city || user.location || user.city || "Bengaluru",
+      }));
     }
   }, [user]);
 
   // Load existing listing when ?edit=<id> is provided; otherwise restore localStorage draft
   useEffect(() => {
-    const id = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("edit") : null;
+    const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const id = searchParams?.get("edit");
+    const mode = searchParams?.get("mode");
     if (id) {
+      setListingFlowMode("self_form");
       setEditId(id);
       setLoadingEdit(true);
       apiFetch<{ property: Record<string, any> }>(`/api/owner/properties/${id}`)
@@ -384,21 +418,40 @@ export function PostPropertyExperience() {
       const saved = localStorage.getItem("aangan-property-draft-v2");
       if (saved) {
         const parsed = JSON.parse(saved);
-        setForm((old) => ({ ...old, ...parsed }));
+        // Cleanse legacy category & vertical types
+        const cleanPropertyType =
+          normalizeFromAllowlist(parsed.propertyType || "", PROPERTY_TYPES_BY_VERTICAL.rent_home) || "Apartment";
+        const cleanBhk =
+          normalizeFromAllowlist(parsed.bhkOrRoomType || "", BHK_OPTIONS_BY_VERTICAL.rent_home) || "2 BHK";
+
+        setForm((old) => ({
+          ...old,
+          ...parsed,
+          category: "rent_home",
+          propertyType: cleanPropertyType,
+          bhkOrRoomType: cleanBhk,
+        }));
       }
     } catch {
       // Ignore draft read errors
     }
   }, [toast]);
 
+  // Ensure form.category is always strictly 'rent_home' even if an old draft had a legacy vertical
   useEffect(() => {
-    if (!editId && form.category) {
-      localStorage.setItem("aangan-property-draft-v2", JSON.stringify(form));
+    if (form.category !== "rent_home") {
+      setForm((old) => ({ ...old, category: "rent_home" }));
+    }
+  }, [form.category]);
+
+  useEffect(() => {
+    if (!editId) {
+      localStorage.setItem("aangan-property-draft-v2", JSON.stringify({ ...form, category: "rent_home" }));
     }
   }, [form, editId]);
 
   function update(changes: Partial<FormDataState>) {
-    setForm((old) => ({ ...old, ...changes }));
+    setForm((old) => ({ ...old, ...changes, category: "rent_home" }));
     setError("");
   }
 
@@ -577,9 +630,9 @@ export function PostPropertyExperience() {
     else if (step === 2) {
       const stepErr = validateVerticalRules(
         {
-          category: form.category,
-          propertyType: form.propertyType,
-          bhkOrRoomType: form.bhkOrRoomType,
+          category: "rent_home",
+          propertyType: form.propertyType || "Apartment",
+          bhkOrRoomType: form.bhkOrRoomType || "2 BHK",
           areaSqft: form.areaSqft,
           floor: form.floor,
           totalFloors: form.totalFloors,
@@ -594,9 +647,9 @@ export function PostPropertyExperience() {
     else if (step === 3) {
       const stepErr = validateVerticalRules(
         {
-          category: form.category,
-          propertyType: form.propertyType,
-          bhkOrRoomType: form.bhkOrRoomType,
+          category: "rent_home",
+          propertyType: form.propertyType || "Apartment",
+          bhkOrRoomType: form.bhkOrRoomType || "2 BHK",
           areaSqft: form.areaSqft || LISTING_LIMITS.rent_home.minAreaSqft,
           price: form.price,
           deposit: form.deposit,
@@ -661,8 +714,8 @@ export function PostPropertyExperience() {
       autoTitle,
       autoDescription,
       payload: {
-        category: form.category,
-        propertyType: form.propertyType,
+        category: "rent_home" as const,
+        propertyType: form.propertyType || "Apartment",
         title: autoTitle,
         description: autoDescription,
         ...(cleanPrice !== undefined ? { price: cleanPrice } : {}),
@@ -830,6 +883,51 @@ export function PostPropertyExperience() {
     }
   }
 
+  function handleSelectSelfListing() {
+    setListingFlowMode("self_form");
+    toast("Self-Listing mode selected. Fill in your property details below.", "info");
+  }
+
+  async function submitManagerRequest(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (submittingManagerRequest) return;
+    if (!managedForm.locality.trim()) {
+      toast("Please enter your property locality or area.", "error");
+      return;
+    }
+    setSubmittingManagerRequest(true);
+    const fee = selectedTier === "premium" ? "999.00" : "499.00";
+    const tierDisplay = selectedTier === "premium" ? "Premium Listing (₹999)" : "Standard Listing (₹499)";
+    try {
+      const data = await apiFetch<{ request: any; message: string }>("/api/owner/manager-requests", {
+        method: "POST",
+        body: JSON.stringify({
+          managedTier: selectedTier,
+          feeAmount: fee,
+          propertyTitle: managedForm.propertyTitle.trim() || undefined,
+          locality: managedForm.locality.trim(),
+          city: managedForm.city.trim() || undefined,
+          ownerContactPhone: managedForm.ownerContactPhone.trim() || undefined,
+          notes: managedForm.notes.trim() || undefined,
+        }),
+      });
+
+      setShowCheckoutModal(false);
+      setManagedSuccessData({
+        id: data.request.id,
+        transactionId: data.request.transactionId || `TXN_MGR_${Date.now().toString().slice(-6)}`,
+        tier: selectedTier,
+        fee,
+      });
+      setListingFlowMode("managed_success");
+      toast(`Hire a Manager request (${tierDisplay}) confirmed! An Apna Aangan manager will reach out shortly.`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't submit manager request. Please try again.", "error");
+    } finally {
+      setSubmittingManagerRequest(false);
+    }
+  }
+
   if (!loading && !user) {
     return (
       <main className="member-page">
@@ -879,17 +977,280 @@ export function PostPropertyExperience() {
           </span>
         </div>
 
-        <div className="post-heading">
-          <span className="eyebrow">
-            <span className="eyebrow-line" /> OWNER PROPERTY SUBMISSION
-          </span>
-          <h1>
-            List your space with <em>clarity.</em>
-          </h1>
-          <p>Provide verified ownership &amp; property details. Our team audits every listing before it goes live.</p>
-        </div>
+        {/* ─────────────────────────────────────────────────────────────
+            STEP 1: Choose Listing Mode (Self vs. Managed)
+           ───────────────────────────────────────────────────────────── */}
+        {listingFlowMode === "choose_mode" && (
+          <div className="owner-listing-mode-wrapper">
+            <div className="post-heading" style={{ textAlign: "center", margin: "24px auto 36px", maxWidth: "700px" }}>
+              <span className="eyebrow" style={{ justifyContent: "center" }}>
+                <Sparkles size={14} /> APNA AANGAN OWNER LISTING OPTIONS
+              </span>
+              <h1>
+                How would you like to <em>list your property?</em>
+              </h1>
+              <p>Choose whether to self-manage your listing details or have a dedicated Apna Aangan manager handle everything for you.</p>
+            </div>
 
-        <div className="post-layout">
+            <div className="listing-mode-grid">
+              {/* Option 1: Do It Yourself */}
+              <div className="listing-mode-card" onClick={handleSelectSelfListing}>
+                <span className="mode-badge mode-badge-free">Self-Service · Free</span>
+                <div className="mode-icon-wrap">
+                  <FileText size={30} />
+                </div>
+                <h3>Do It Yourself (Self-Listing)</h3>
+                <p className="mode-desc">
+                  Fill in your property details, photos, and pricing yourself at your own pace.
+                </p>
+                <ul className="mode-bullets">
+                  <li>
+                    <Check size={16} /> Direct access to our full 6-step property builder
+                  </li>
+                  <li>
+                    <Check size={16} /> Upload 5+ photos and specify exact amenities
+                  </li>
+                  <li>
+                    <Check size={16} /> Zero listing fees · 100% self-managed
+                  </li>
+                </ul>
+                <button type="button" className="btn btn-outline btn-full" onClick={handleSelectSelfListing}>
+                  Start Self-Listing <ArrowRight size={16} />
+                </button>
+              </div>
+
+              {/* Option 2: Hire a Manager */}
+              <div className="listing-mode-card listing-mode-card-managed" onClick={() => setListingFlowMode("choose_tier")}>
+                <span className="mode-badge mode-badge-managed">✨ Handled For You</span>
+                <div className="mode-icon-wrap mode-icon-managed">
+                  <Sparkles size={30} />
+                </div>
+                <h3>Hire a Manager (Managed Listing)</h3>
+                <p className="mode-desc">
+                  Let an Apna Aangan manager handle your property listing for you.
+                </p>
+                <ul className="mode-bullets">
+                  <li>
+                    <Check size={16} /> Dedicated manager reaches out to gather your property specs
+                  </li>
+                  <li>
+                    <Check size={16} /> Professional listing formatting, curation, and verification
+                  </li>
+                  <li>
+                    <Check size={16} /> Standard (₹499) and Premium Recommended (₹999) tiers available
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-full"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setListingFlowMode("choose_tier");
+                  }}
+                >
+                  Hire a Manager <ArrowRight size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
+            STEP 2: Choose Managed Listing Tier (Standard vs. Premium)
+           ───────────────────────────────────────────────────────────── */}
+        {listingFlowMode === "choose_tier" && (
+          <div className="owner-tier-selection-wrapper">
+            <button type="button" className="back-to-mode-btn" onClick={() => setListingFlowMode("choose_mode")}>
+              <ArrowLeft size={16} /> Back to listing options
+            </button>
+
+            <div className="post-heading" style={{ textAlign: "center", margin: "14px auto 36px", maxWidth: "720px" }}>
+              <span className="eyebrow" style={{ justifyContent: "center" }}>
+                <ShieldCheck size={14} /> DEDICATED PROPERTY MANAGEMENT
+              </span>
+              <h1>
+                Choose Your <em>Managed Listing Tier</em>
+              </h1>
+              <p>Select the tier that fits your needs. Our managers handle tenant inquiries and coordinate viewings directly on your behalf.</p>
+            </div>
+
+            <div className="tier-comparison-grid">
+              {/* Tier 1: Standard Listing — ₹499 */}
+              <div className={`tier-card ${selectedTier === "standard" ? "tier-card-active" : ""}`}>
+                <div className="tier-header">
+                  <span className="tier-pill tier-pill-standard">Standard Service</span>
+                  <h3>Standard Listing</h3>
+                  <div className="tier-price">
+                    <span className="tier-currency">₹</span>
+                    <span className="tier-amount">499</span>
+                    <span className="tier-period">/ one-time fee</span>
+                  </div>
+                  <p className="tier-summary">Direct listing by a manager using the details you share.</p>
+                </div>
+
+                <div className="tier-deliverables">
+                  <h4>What&apos;s included:</h4>
+                  <ul>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Direct listing by a manager:</strong> A manager uploads and publishes your listing from details you provide.</span>
+                    </li>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Standard search placement:</strong> Listed prominently among verified residential rentals.</span>
+                    </li>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Phone/WhatsApp coordination:</strong> Quick briefing to collect photos and key terms.</span>
+                    </li>
+                    <li className="tier-excluded">
+                      <X size={16} className="tier-cross" />
+                      <span>No full property verification, optimization, or extra checks included.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="tier-footer">
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-full tier-cta-btn"
+                    onClick={() => {
+                      setSelectedTier("standard");
+                      setShowCheckoutModal(true);
+                    }}
+                  >
+                    Continue with Standard — ₹499
+                  </button>
+                </div>
+              </div>
+
+              {/* Tier 2: Premium Listing — ₹999 (Recommended) */}
+              <div className={`tier-card tier-card-recommended ${selectedTier === "premium" ? "tier-card-active" : ""}`}>
+                <div className="tier-recommended-ribbon">
+                  <Star size={13} fill="currentColor" /> RECOMMENDED
+                </div>
+                <div className="tier-header">
+                  <span className="tier-pill tier-pill-premium">⭐ Recommended Full Concierge</span>
+                  <h3>Premium Listing</h3>
+                  <div className="tier-price">
+                    <span className="tier-currency">₹</span>
+                    <span className="tier-amount">999</span>
+                    <span className="tier-period">/ one-time payment</span>
+                  </div>
+                  <p className="tier-summary">Complete verification, photographic polish, and priority recommended boost.</p>
+                </div>
+
+                <div className="tier-deliverables">
+                  <h4>What&apos;s included:</h4>
+                  <ul>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Complete property check:</strong> Thorough verification of all listing specifications and ownership.</span>
+                    </li>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Manager updates &amp; polish:</strong> Manager updates, polishes, and optimizes photos, description, and listing data.</span>
+                    </li>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Priority &amp; &ldquo;Recommended&rdquo; Boost:</strong> Highlighted placement across the Apna Aangan website.</span>
+                    </li>
+                    <li>
+                      <Check size={16} className="tier-check" />
+                      <span><strong>Dedicated manager assignment:</strong> Fast-track manager assignment within 2 business hours.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="tier-footer">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-full tier-cta-btn"
+                    onClick={() => {
+                      setSelectedTier("premium");
+                      setShowCheckoutModal(true);
+                    }}
+                  >
+                    Continue with Premium — ₹999
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
+            MANAGED SUCCESS CONFIRMATION
+           ───────────────────────────────────────────────────────────── */}
+        {listingFlowMode === "managed_success" && managedSuccessData && (
+          <div className="managed-success-card">
+            <div className="success-check-bubble">
+              <CheckCircle2 size={40} />
+            </div>
+            <h2>Request Submitted Successfully!</h2>
+            <p style={{ color: "var(--muted)", fontSize: "14px", margin: "0 0 16px" }}>
+              Your Apna Aangan manager for <strong>{managedSuccessData.tier === "premium" ? "Premium Listing (₹999)" : "Standard Listing (₹499)"}</strong> has been assigned to your request.
+            </p>
+            <span className="managed-txn-id">Transaction Reference: {managedSuccessData.transactionId}</span>
+
+            <div className="managed-next-steps">
+              <h4>What happens next?</h4>
+              <ol>
+                <li>An Apna Aangan manager will call your verified number ({managedForm.ownerContactPhone || user?.phone || "registered phone"}) within 2 business hours.</li>
+                <li>They will collect and verify your property specifications, lease terms, and photographs.</li>
+                {managedSuccessData.tier === "premium" && (
+                  <li>Our team will polish your listing photos and activate your <strong>Priority &ldquo;Recommended&rdquo; Boost</strong>.</li>
+                )}
+                <li>Once confirmed, your property will be published live on Apna Aangan!</li>
+              </ol>
+            </div>
+
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+              <Link href="/owner" className="btn btn-primary">
+                Go to Owner Dashboard <ArrowRight size={16} />
+              </Link>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setListingFlowMode("choose_mode");
+                  setManagedSuccessData(null);
+                }}
+              >
+                Submit Another Request
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
+            STANDARD SELF-LISTING FORM (When Self-Listing selected)
+           ───────────────────────────────────────────────────────────── */}
+        {listingFlowMode === "self_form" && (
+          <>
+            <div className="post-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "16px" }}>
+              <div>
+                <span className="eyebrow">
+                  <span className="eyebrow-line" /> DO IT YOURSELF · SELF-LISTING
+                </span>
+                <h1>
+                  List your space with <em>clarity.</em>
+                </h1>
+                <p>Provide verified ownership &amp; property details. Our team audits every listing before it goes live.</p>
+              </div>
+              {!editId && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ fontSize: "11px", fontWeight: 700 }}
+                  onClick={() => setListingFlowMode("choose_tier")}
+                >
+                  <Sparkles size={14} style={{ color: "#7c3aed" }} /> Switch to Hire a Manager
+                </button>
+              )}
+            </div>
+
+            <div className="post-layout">
           {/* Stepper Navigation */}
           <aside className="post-stepper">
             <strong>LISTING STEPS</strong>
@@ -1136,6 +1497,7 @@ export function PostPropertyExperience() {
                   <button
                     type="button"
                     className="selected"
+                    onClick={() => update({ category: "rent_home" })}
                   >
                     <KeyRound size={23} />
                     <strong>Rent out a home</strong>
@@ -1241,12 +1603,12 @@ export function PostPropertyExperience() {
 
                 <label className="form-label">PROPERTY TYPE <span style={{ color: "#dc2626" }}>*</span></label>
                 <div className="choice-pill-row">
-                  {propertyTypesByCategory[form.category]?.map((type) => (
+                  {(propertyTypesByCategory[form.category] || PROPERTY_TYPES_BY_VERTICAL.rent_home).map((type) => (
                     <button
                       key={type}
                       type="button"
-                      className={form.propertyType === type ? "selected" : ""}
-                      onClick={() => update({ propertyType: type })}
+                      className={(form.propertyType || "Apartment") === type ? "selected" : ""}
+                      onClick={() => update({ propertyType: type, category: "rent_home" })}
                     >
                       {type}
                     </button>
@@ -1261,8 +1623,8 @@ export function PostPropertyExperience() {
                     <button
                       key={bhk}
                       type="button"
-                      className={form.bhkOrRoomType === bhk ? "selected" : ""}
-                      onClick={() => update({ bhkOrRoomType: bhk })}
+                      className={(form.bhkOrRoomType || "2 BHK") === bhk ? "selected" : ""}
+                      onClick={() => update({ bhkOrRoomType: bhk, category: "rent_home" })}
                     >
                       {bhk}
                     </button>
@@ -1793,7 +2155,167 @@ export function PostPropertyExperience() {
             </div>
           </div>
         </div>
+          </>
+        )}
       </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          CHECKOUT & PAYMENT CONFIRMATION MODAL
+         ───────────────────────────────────────────────────────────── */}
+      {showCheckoutModal && (
+        <div className="mgr-modal-backdrop" onClick={() => !submittingManagerRequest && setShowCheckoutModal(false)}>
+          <div className="mgr-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mgr-modal-header">
+              <div>
+                <span className="eyebrow">
+                  {selectedTier === "premium" ? "⭐ RECOMMENDED TIER" : "STANDARD TIER"}
+                </span>
+                <h3>Confirm Managed Listing Request</h3>
+              </div>
+              <button
+                type="button"
+                className="mgr-modal-close"
+                onClick={() => setShowCheckoutModal(false)}
+                disabled={submittingManagerRequest}
+                aria-label="Close modal"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className={`mgr-tier-summary-box ${selectedTier === "premium" ? "premium" : ""}`}>
+              <div>
+                <strong>{selectedTier === "premium" ? "Premium Listing — ₹999" : "Standard Listing — ₹499"}</strong>
+                <span>{selectedTier === "premium" ? "Complete verification, photo polish & Recommended boost" : "Direct manager listing & standard placement"}</span>
+              </div>
+              <div className="mgr-tier-fee-display">
+                {selectedTier === "premium" ? "₹999" : "₹499"}
+              </div>
+            </div>
+
+            <form onSubmit={submitManagerRequest}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                    Property Locality / Area <span style={{ color: "#dc2626" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Vaishali Nagar, Mansarovar, Jagatpura"
+                    value={managedForm.locality}
+                    onChange={(e) => setManagedForm({ ...managedForm, locality: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-two-cols">
+                  <div>
+                    <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                      City
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Bengaluru"
+                      value={managedForm.city}
+                      onChange={(e) => setManagedForm({ ...managedForm, city: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                      Owner Contact Phone <span style={{ color: "#dc2626" }}>*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      className="form-input"
+                      placeholder="10-digit mobile"
+                      value={managedForm.ownerContactPhone}
+                      onChange={(e) => setManagedForm({ ...managedForm, ownerContactPhone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                    Optional Property Title or Landmark
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 2 BHK Sunlit Flat near Metro Station"
+                    value={managedForm.propertyTitle}
+                    onChange={(e) => setManagedForm({ ...managedForm, propertyTitle: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                    Notes for the Manager (Optional)
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows={2}
+                    placeholder="Any specific instructions, preferred call time, or rent expectations..."
+                    value={managedForm.notes}
+                    onChange={(e) => setManagedForm({ ...managedForm, notes: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
+                    Select Payment Method
+                  </label>
+                  <div className="payment-method-selector">
+                    <button
+                      type="button"
+                      className={`pm-option ${managedForm.paymentMethod === "upi" ? "active" : ""}`}
+                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "upi" })}
+                    >
+                      📱 UPI / GPay
+                    </button>
+                    <button
+                      type="button"
+                      className={`pm-option ${managedForm.paymentMethod === "card" ? "active" : ""}`}
+                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "card" })}
+                    >
+                      💳 Card
+                    </button>
+                    <button
+                      type="button"
+                      className={`pm-option ${managedForm.paymentMethod === "netbanking" ? "active" : ""}`}
+                      onClick={() => setManagedForm({ ...managedForm, paymentMethod: "netbanking" })}
+                    >
+                      🏦 NetBanking
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ flex: 1 }}
+                    onClick={() => setShowCheckoutModal(false)}
+                    disabled={submittingManagerRequest}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ flex: 2, fontWeight: 800 }}
+                    disabled={submittingManagerRequest}
+                  >
+                    {submittingManagerRequest ? "Processing..." : `Pay ₹${selectedTier === "premium" ? "999" : "499"} & Submit Request`}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

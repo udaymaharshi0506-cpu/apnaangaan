@@ -121,6 +121,34 @@ export type ModeratedProperty = AdminProperty & {
   owner?: { id: string; name: string | null; phone: string | null; email: string | null } | null;
 };
 
+export type AdminManagerRequest = {
+  id: string;
+  ownerId: string;
+  propertyId: string | null;
+  listingMode: "self" | "managed";
+  managedTier: "none" | "standard" | "premium";
+  feeAmount: string;
+  paymentStatus: "not_required" | "pending" | "paid" | "failed";
+  transactionId: string | null;
+  isRecommended: boolean;
+  requestStatus: "new" | "assigned" | "in_review" | "published" | "rejected";
+  assignedManagerId: string | null;
+  assignedManagerName: string | null;
+  propertyTitle: string | null;
+  locality: string | null;
+  city: string | null;
+  ownerContactPhone: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  owner: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+};
+
 export type Stats = {
   listingsByCategory: Array<{ category: string; total: number }>;
   leadsByStatus: Array<{ status: string; total: number }>;
@@ -132,6 +160,8 @@ export type Stats = {
   ownerCount?: number;
   inquiriesByDay: Array<{ day: string; total: number }>;
   conversionRate: number;
+  managerRequestsCount?: number;
+  newManagerRequestsCount?: number;
 };
 
 function niceDate(date: string | Date | null | undefined) {
@@ -2617,12 +2647,38 @@ function exportUsersToCSV(userList: AdminUser[]) {
 export function AdminDashboardExperience() {
   const router = useRouter();
   const { user, logout, toast } = useApp();
-  const [view, setView] = useState<"overview" | "properties" | "moderation" | "leads" | "users">("overview");
+  const [view, setView] = useState<"overview" | "requests" | "properties" | "moderation" | "leads" | "users">("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [leads, setLeads] = useState<AdminLead[]>([]);
   const [moderation, setModeration] = useState<ModeratedProperty[]>([]);
   const [allProperties, setAllProperties] = useState<ModeratedProperty[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+
+  // Owner Requests Queue state
+  const [managerRequests, setManagerRequests] = useState<AdminManagerRequest[]>([]);
+  const [managerRequestStats, setManagerRequestStats] = useState<{
+    total: number;
+    newCount: number;
+    assignedCount: number;
+    inReviewCount: number;
+    publishedCount: number;
+    standardCount: number;
+    premiumCount: number;
+    totalRevenue: number;
+  } | null>(null);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [reqSearch, setReqSearch] = useState("");
+  const [reqStatusFilter, setReqStatusFilter] = useState("all");
+  const [reqTierFilter, setReqTierFilter] = useState("all");
+  const [reqModeFilter, setReqModeFilter] = useState("all");
+  const [assigningRequest, setAssigningRequest] = useState<AdminManagerRequest | null>(null);
+  const [managerNameInput, setManagerNameInput] = useState("");
+  const [submittingAssignment, setSubmittingAssignment] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<AdminManagerRequest | null>(null);
+  const [editReqForm, setEditReqForm] = useState({ propertyTitle: "", locality: "", city: "", notes: "" });
+  const [savingRequestDetails, setSavingRequestDetails] = useState(false);
+  const [togglingRecommendedId, setTogglingRecommendedId] = useState<string | null>(null);
+  const [requestHighlightId, setRequestHighlightId] = useState<string | null>(null);
 
   // Selection modals
   const [selectedLead, setSelectedLead] = useState<AdminLead | null>(null);
@@ -2720,6 +2776,39 @@ export function AdminDashboardExperience() {
     }
   }, [userCategoryTab, userSearch, toast]);
 
+  const loadManagerRequests = useCallback(async () => {
+    setLoadingRequests(true);
+    try {
+      const params = new URLSearchParams();
+      if (reqStatusFilter && reqStatusFilter !== "all") params.set("status", reqStatusFilter);
+      if (reqTierFilter && reqTierFilter !== "all") params.set("tier", reqTierFilter);
+      if (reqModeFilter && reqModeFilter !== "all") params.set("mode", reqModeFilter);
+      if (reqSearch.trim()) params.set("q", reqSearch.trim());
+      params.set("limit", "100");
+
+      const data = await apiFetch<{
+        items: AdminManagerRequest[];
+        total: number;
+        stats: {
+          total: number;
+          newCount: number;
+          assignedCount: number;
+          inReviewCount: number;
+          publishedCount: number;
+          standardCount: number;
+          premiumCount: number;
+          totalRevenue: number;
+        };
+      }>(`/api/admin/manager-requests?${params.toString()}`);
+      setManagerRequests(data.items);
+      setManagerRequestStats(data.stats);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Couldn't load manager requests", "error");
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, [reqStatusFilter, reqTierFilter, reqModeFilter, reqSearch, toast]);
+
   useEffect(() => {
     void load();
   }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2735,6 +2824,109 @@ export function AdminDashboardExperience() {
       void loadUsers();
     }
   }, [view, userCategoryTab, userSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view === "requests") {
+      void loadManagerRequests();
+    }
+  }, [view, reqStatusFilter, reqTierFilter, reqModeFilter, reqSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const targetView = sp.get("view");
+      if (
+        targetView === "requests" ||
+        targetView === "properties" ||
+        targetView === "moderation" ||
+        targetView === "leads" ||
+        targetView === "users"
+      ) {
+        setView(targetView);
+      }
+      const targetId = sp.get("id");
+      if (targetId) {
+        setRequestHighlightId(targetId);
+      }
+    }
+  }, []);
+
+  async function handleAssignManager(e: FormEvent) {
+    e.preventDefault();
+    if (!assigningRequest || !managerNameInput.trim()) return;
+    setSubmittingAssignment(true);
+    try {
+      await apiFetch(`/api/admin/manager-requests/${assigningRequest.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "assign_manager", managerName: managerNameInput.trim() }),
+      });
+      toast(`Manager "${managerNameInput.trim()}" assigned to request.`);
+      setAssigningRequest(null);
+      setManagerNameInput("");
+      await Promise.all([load(), loadManagerRequests()]);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't assign manager", "error");
+    } finally {
+      setSubmittingAssignment(false);
+    }
+  }
+
+  async function handleToggleRecommended(req: AdminManagerRequest) {
+    setTogglingRecommendedId(req.id);
+    try {
+      const nextVal = !req.isRecommended;
+      await apiFetch(`/api/admin/manager-requests/${req.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "toggle_recommended", isRecommended: nextVal }),
+      });
+      toast(nextVal ? "Recommended boost enabled ⭐" : "Recommended boost disabled");
+      setManagerRequests((prev) =>
+        prev.map((item) => (item.id === req.id ? { ...item, isRecommended: nextVal } : item))
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't toggle boost", "error");
+    } finally {
+      setTogglingRecommendedId(null);
+    }
+  }
+
+  async function handleSaveRequestDetails(e: FormEvent) {
+    e.preventDefault();
+    if (!editingRequest) return;
+    setSavingRequestDetails(true);
+    try {
+      await apiFetch(`/api/admin/manager-requests/${editingRequest.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "update_details",
+          propertyTitle: editReqForm.propertyTitle,
+          locality: editReqForm.locality,
+          city: editReqForm.city,
+          notes: editReqForm.notes,
+        }),
+      });
+      toast("Listing request details updated.");
+      setEditingRequest(null);
+      await loadManagerRequests();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't update request details", "error");
+    } finally {
+      setSavingRequestDetails(false);
+    }
+  }
+
+  async function handleUpdateRequestStatus(reqId: string, newStatus: string, notes?: string) {
+    try {
+      await apiFetch(`/api/admin/manager-requests/${reqId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: newStatus, notes }),
+      });
+      toast(`Status updated to ${newStatus.replace("_", " ")}`);
+      await Promise.all([load(), loadManagerRequests()]);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't update status", "error");
+    }
+  }
 
   async function quickModerate(id: string, action: "approve" | "reject" | "flag", reason?: string) {
     setBusyQuickModerate(true);
@@ -2754,7 +2946,7 @@ export function AdminDashboardExperience() {
   const handleRefreshAll = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([load(), loadProperties(), loadUsers()]);
+      await Promise.all([load(), loadProperties(), loadUsers(), loadManagerRequests()]);
       toast("Synced with live PostgreSQL database");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Sync error", "error");
@@ -2785,6 +2977,12 @@ export function AdminDashboardExperience() {
         <nav>
           {[
             { value: "overview", label: "Overview", Icon: LayoutDashboard },
+            {
+              value: "requests",
+              label: "Owner Requests Queue",
+              Icon: Sparkles,
+              count: (stats?.newManagerRequestsCount ?? managerRequestStats?.newCount ?? 0) > 0 ? (stats?.newManagerRequestsCount ?? managerRequestStats?.newCount) : undefined,
+            },
             { value: "properties", label: "All Properties", Icon: Home, count: totalListings },
             { value: "users", label: "Registered Users", Icon: UsersRound, count: stats?.totalUsers || totalUsers },
             { value: "moderation", label: "Listing moderation", Icon: BadgeCheck, count: pending },
@@ -2828,6 +3026,8 @@ export function AdminDashboardExperience() {
             <strong>
               {view === "overview"
                 ? "Overview"
+                : view === "requests"
+                ? "Owner Requests & Listings Queue"
                 : view === "properties"
                 ? "All Properties"
                 : view === "users"
@@ -2895,6 +3095,13 @@ export function AdminDashboardExperience() {
                   </span>
                 </div>
                 <div className="admin-hub-actions">
+                  <button
+                    className="btn btn-sm btn-ghost admin-btn-ghost"
+                    onClick={() => setView("requests")}
+                    style={{ borderColor: "rgba(124, 58, 237, 0.35)", color: "#7c3aed", fontWeight: 700 }}
+                  >
+                    <Sparkles size={14} /> Owner Requests {(stats?.newManagerRequestsCount || 0) > 0 && <span className="mini-badge" style={{ background: "#7c3aed" }}>{stats?.newManagerRequestsCount}</span>}
+                  </button>
                   <Link href="/post" className="btn btn-sm admin-btn-action">
                     <Plus size={14} /> Add Listing
                   </Link>
@@ -2910,8 +3117,33 @@ export function AdminDashboardExperience() {
                 </div>
               </div>
 
-              {/* 4 Classy Executive Stat Cards */}
+              {/* Executive Stat Cards */}
               <div className="admin-stat-grid">
+                <div
+                  className="admin-stat-card card-purple"
+                  onClick={() => setView("requests")}
+                  role="button"
+                  tabIndex={0}
+                  style={{ background: "linear-gradient(135deg, rgba(124, 58, 237, 0.05) 0%, rgba(124, 58, 237, 0.12) 100%)", borderColor: "rgba(124, 58, 237, 0.35)" }}
+                >
+                  <div className="admin-stat-top">
+                    <span className="stat-icon purple">
+                      <Sparkles size={20} />
+                    </span>
+                    <span className="stat-badge purple-badge">
+                      {(stats?.newManagerRequestsCount || 0) > 0 ? `${stats?.newManagerRequestsCount} New Action` : "Managed Active"}
+                    </span>
+                  </div>
+                  <span className="stat-label">Owner Requests &amp; Listings</span>
+                  <strong className="stat-number">{stats?.managerRequestsCount || managerRequests.length || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span>Standard ₹499</span> · <span>Premium ₹999 ⭐</span> · <span>Self-Listings</span>
+                  </div>
+                  <div className="stat-footer-link">
+                    <span>Open Requests Queue</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </div>
                 <div
                   className="admin-stat-card card-green"
                   onClick={() => setView("properties")}
@@ -3152,6 +3384,387 @@ export function AdminDashboardExperience() {
                     <MessageSquare size={28} />
                     <strong>No inquiries yet</strong>
                     <span>New tenant inquiries will appear here in real-time.</span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* VIEW: OWNER REQUESTS & LISTINGS QUEUE */}
+          {view === "requests" && (
+            <>
+              <div className="admin-page-intro">
+                <div>
+                  <span className="eyebrow" style={{ color: "#7c3aed" }}>
+                    <Sparkles size={14} /> MANAGED SERVICE &amp; OWNER QUEUE
+                  </span>
+                  <h1>Owner Requests &amp; Listings Queue</h1>
+                  <p>
+                    Manage owner self-listings and dedicated managed requests (Standard ₹499 &amp; Premium ₹999).
+                    Assign managers, polish listing details, and activate Recommended boosts.
+                  </p>
+                </div>
+                <div className="admin-intro-actions">
+                  <button
+                    className="admin-sync-btn"
+                    onClick={() => void loadManagerRequests()}
+                    disabled={loadingRequests}
+                    title="Refresh requests queue"
+                  >
+                    <RefreshCw size={14} className={loadingRequests ? "spin-animate" : ""} />
+                    <span>{loadingRequests ? "Refreshing..." : "Refresh Queue"}</span>
+                  </button>
+                  <span className="admin-date">
+                    <CalendarDays size={16} />
+                    {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
+                  </span>
+                </div>
+              </div>
+
+              {/* 5 Quick Metrics Cards */}
+              <div className="admin-stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+                <div className="admin-stat-card card-purple">
+                  <div className="admin-stat-top">
+                    <span className="stat-icon purple"><Sparkles size={20} /></span>
+                    <span className="stat-badge purple-badge">Queue Total</span>
+                  </div>
+                  <span className="stat-label">Total Requests</span>
+                  <strong className="stat-number">{managerRequestStats?.total ?? managerRequests.length}</strong>
+                  <div className="stat-category-pills">
+                    <span>{managerRequestStats?.publishedCount || 0} Published</span> · <span>{managerRequestStats?.inReviewCount || 0} Reviewing</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card card-orange">
+                  <div className="admin-stat-top">
+                    <span className="stat-icon orange"><AlertTriangle size={20} /></span>
+                    <span className="stat-badge orange-badge">Action Needed</span>
+                  </div>
+                  <span className="stat-label">New Requests</span>
+                  <strong className="stat-number">{managerRequestStats?.newCount || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span>Awaiting Manager Assignment</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card card-green" style={{ background: "linear-gradient(135deg, #fefce8 0%, #fef3c7 100%)", borderColor: "#fde047" }}>
+                  <div className="admin-stat-top">
+                    <span className="stat-icon" style={{ background: "#fef08a", color: "#854d0e" }}><Sparkles size={20} /></span>
+                    <span className="stat-badge" style={{ background: "#ca8a04", color: "#ffffff", fontWeight: 800 }}>⭐ Recommended</span>
+                  </div>
+                  <span className="stat-label" style={{ color: "#854d0e" }}>Premium Tier (₹999)</span>
+                  <strong className="stat-number" style={{ color: "#713f12" }}>{managerRequestStats?.premiumCount || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span style={{ color: "#854d0e" }}>Full check + Boost eligible</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card card-blue">
+                  <div className="admin-stat-top">
+                    <span className="stat-icon blue"><Building2 size={20} /></span>
+                    <span className="stat-badge blue-badge">Standard Service</span>
+                  </div>
+                  <span className="stat-label">Standard Tier (₹499)</span>
+                  <strong className="stat-number">{managerRequestStats?.standardCount || 0}</strong>
+                  <div className="stat-category-pills">
+                    <span>Direct manager upload</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card card-green">
+                  <div className="admin-stat-top">
+                    <span className="stat-icon green"><CheckCircle2 size={20} /></span>
+                    <span className="stat-badge green-badge">Revenue</span>
+                  </div>
+                  <span className="stat-label">Total Fee Revenue</span>
+                  <strong className="stat-number">₹{(managerRequestStats?.totalRevenue || 0).toLocaleString("en-IN")}</strong>
+                  <div className="stat-category-pills">
+                    <span>From Paid Managed Tiers</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filters & Search */}
+              <div className="admin-queue-filters">
+                <div className="admin-queue-search">
+                  <Search size={16} style={{ color: "var(--muted)" }} />
+                  <input
+                    type="text"
+                    placeholder="Search by owner name, phone, title, locality..."
+                    value={reqSearch}
+                    onChange={(e) => setReqSearch(e.target.value)}
+                  />
+                  {reqSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReqSearch("")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  className="admin-queue-select"
+                  value={reqStatusFilter}
+                  onChange={(e) => setReqStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="new">🔴 New (Unassigned)</option>
+                  <option value="assigned">🔵 Assigned</option>
+                  <option value="in_review">🟡 In Review</option>
+                  <option value="published">🟢 Published</option>
+                  <option value="rejected">⚪ Rejected</option>
+                </select>
+
+                <select
+                  className="admin-queue-select"
+                  value={reqTierFilter}
+                  onChange={(e) => setReqTierFilter(e.target.value)}
+                >
+                  <option value="all">All Tiers</option>
+                  <option value="premium">⭐ Premium Listing (₹999)</option>
+                  <option value="standard">Standard Listing (₹499)</option>
+                  <option value="none">Free / Self-Listing</option>
+                </select>
+
+                <select
+                  className="admin-queue-select"
+                  value={reqModeFilter}
+                  onChange={(e) => setReqModeFilter(e.target.value)}
+                >
+                  <option value="all">All Modes</option>
+                  <option value="managed">✨ Hire a Manager</option>
+                  <option value="self">Do It Yourself (Self)</option>
+                </select>
+              </div>
+
+              {/* Requests Data Table */}
+              <div className="admin-table-wrapper" style={{ background: "var(--surface)", borderRadius: "12px", border: "1px solid var(--border)", overflow: "hidden" }}>
+                {loadingRequests ? (
+                  <div style={{ padding: "48px 20px", textAlign: "center", color: "var(--muted)" }}>
+                    <RefreshCw size={24} className="spin-animate" style={{ margin: "0 auto 12px" }} />
+                    <p>Loading owner requests queue...</p>
+                  </div>
+                ) : managerRequests.length === 0 ? (
+                  <div style={{ padding: "48px 20px", textAlign: "center", color: "var(--muted)" }}>
+                    <Sparkles size={32} style={{ margin: "0 auto 12px", opacity: 0.5, color: "#7c3aed" }} />
+                    <h3 style={{ margin: "0 0 6px", color: "var(--ink)" }}>No requests found</h3>
+                    <p style={{ margin: 0, fontSize: "13px" }}>
+                      {reqSearch || reqStatusFilter !== "all" || reqTierFilter !== "all" || reqModeFilter !== "all"
+                        ? "Try clearing your filters to see more results."
+                        : "Owner requests for self-listings and managed tiers will appear here."}
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                      <thead>
+                        <tr style={{ background: "var(--surface-soft)", borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>OWNER</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>PROPERTY / LOCALITY</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>LISTING MODE</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>SERVICE TIER</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>PAYMENT</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>REQUEST STATUS</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>ASSIGNED MANAGER</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>RECOMMENDED BOOST</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)" }}>DATE</th>
+                          <th style={{ padding: "12px 14px", fontWeight: 700, color: "var(--muted)", textAlign: "right" }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {managerRequests.map((req) => {
+                          const isHighlighted = req.id === requestHighlightId;
+                          return (
+                            <tr
+                              key={req.id}
+                              style={{
+                                borderBottom: "1px solid var(--border)",
+                                background: isHighlighted ? "rgba(124, 58, 237, 0.08)" : undefined,
+                                transition: "background 0.15s",
+                              }}
+                            >
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                <strong>{req.owner?.name || "Owner"}</strong>
+                                <div style={{ color: "var(--muted)", fontSize: "11px", marginTop: "2px" }}>
+                                  📞 {req.ownerContactPhone || req.owner?.phone || "No phone"}
+                                </div>
+                                {req.owner?.email && (
+                                  <div style={{ color: "var(--muted)", fontSize: "10.5px" }}>
+                                    ✉️ {req.owner.email}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                <strong>{req.propertyTitle || "Untitled property"}</strong>
+                                <div style={{ color: "var(--muted)", fontSize: "11px", marginTop: "2px" }}>
+                                  📍 {req.locality ? `${req.locality}, ` : ""}{req.city || "Bengaluru"}
+                                </div>
+                                {req.notes && (
+                                  <div style={{ color: "#6d28d9", fontSize: "11px", fontStyle: "italic", marginTop: "4px", maxWidth: "220px" }}>
+                                    &ldquo;{req.notes.length > 60 ? `${req.notes.slice(0, 60)}...` : req.notes}&rdquo;
+                                  </div>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                {req.listingMode === "managed" ? (
+                                  <span className="queue-badge-mode queue-badge-managed">
+                                    <Sparkles size={11} /> Hire a Manager
+                                  </span>
+                                ) : (
+                                  <span className="queue-badge-mode queue-badge-self">
+                                    <FileText size={11} /> Self-Listing
+                                  </span>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                {req.managedTier === "premium" ? (
+                                  <span className="queue-badge-tier queue-tier-premium">
+                                    <Sparkles size={11} /> Premium · ₹999
+                                  </span>
+                                ) : req.managedTier === "standard" ? (
+                                  <span className="queue-badge-tier queue-tier-standard">
+                                    Standard · ₹499
+                                  </span>
+                                ) : (
+                                  <span className="queue-badge-tier queue-tier-none">
+                                    Self · Free
+                                  </span>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                <span className={`queue-badge-payment payment-${req.paymentStatus}`}>
+                                  {req.paymentStatus === "paid" ? `✓ Paid (₹${req.feeAmount})` : req.paymentStatus === "pending" ? "Pending" : "Not Required"}
+                                </span>
+                                {req.transactionId && (
+                                  <div style={{ fontSize: "9.5px", color: "var(--muted)", marginTop: "3px", fontFamily: "monospace" }}>
+                                    {req.transactionId}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                <span className={`status-pill status-${req.requestStatus}`}>
+                                  {req.requestStatus === "new" ? "🔴 New" : req.requestStatus === "assigned" ? "🔵 Assigned" : req.requestStatus === "in_review" ? "🟡 In Review" : req.requestStatus === "published" ? "🟢 Published" : "⚪ Rejected"}
+                                </span>
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                {req.assignedManagerName ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    <strong style={{ fontSize: "11.5px" }}>👤 {req.assignedManagerName}</strong>
+                                    <button
+                                      type="button"
+                                      className="queue-action-btn"
+                                      style={{ padding: "2px 6px", fontSize: "10px" }}
+                                      onClick={() => {
+                                        setAssigningRequest(req);
+                                        setManagerNameInput(req.assignedManagerName || "");
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="queue-action-btn queue-action-btn-primary"
+                                    style={{ padding: "4px 8px", fontSize: "10.5px" }}
+                                    onClick={() => {
+                                      setAssigningRequest(req);
+                                      setManagerNameInput("");
+                                    }}
+                                  >
+                                    <UserCheck size={12} /> Assign Manager
+                                  </button>
+                                )}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                                <button
+                                  type="button"
+                                  className={`boost-toggle-btn ${req.isRecommended ? "active" : "inactive"}`}
+                                  disabled={togglingRecommendedId === req.id}
+                                  onClick={() => void handleToggleRecommended(req)}
+                                  title={req.isRecommended ? "Click to disable boost" : "Click to enable Recommended boost"}
+                                >
+                                  <Sparkles size={12} />
+                                  <span>{req.isRecommended ? "Boosted ⭐" : "Enable Boost"}</span>
+                                </button>
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                {niceDate(req.createdAt)}
+                              </td>
+
+                              <td style={{ padding: "12px 14px", verticalAlign: "top", textAlign: "right" }}>
+                                <div className="queue-action-group" style={{ justifyContent: "flex-end" }}>
+                                  <button
+                                    type="button"
+                                    className="queue-action-btn"
+                                    title="View & Edit Details for Polish"
+                                    onClick={() => {
+                                      setEditingRequest(req);
+                                      setEditReqForm({
+                                        propertyTitle: req.propertyTitle || "",
+                                        locality: req.locality || "",
+                                        city: req.city || "Bengaluru",
+                                        notes: req.notes || "",
+                                      });
+                                    }}
+                                  >
+                                    <Eye size={12} /> Inspect / Edit
+                                  </button>
+
+                                  {req.requestStatus !== "in_review" && req.requestStatus !== "published" && (
+                                    <button
+                                      type="button"
+                                      className="queue-action-btn"
+                                      style={{ color: "#d97706" }}
+                                      onClick={() => void handleUpdateRequestStatus(req.id, "in_review")}
+                                    >
+                                      In Review
+                                    </button>
+                                  )}
+
+                                  {req.requestStatus !== "published" && (
+                                    <button
+                                      type="button"
+                                      className="queue-action-btn queue-action-btn-primary"
+                                      onClick={() => void handleUpdateRequestStatus(req.id, "published")}
+                                    >
+                                      <Check size={12} /> Publish
+                                    </button>
+                                  )}
+
+                                  {req.requestStatus !== "rejected" && (
+                                    <button
+                                      type="button"
+                                      className="queue-action-btn"
+                                      style={{ color: "#dc2626" }}
+                                      onClick={() => {
+                                        const reason = window.prompt("Optional reason for rejecting request:");
+                                        if (reason !== null) {
+                                          void handleUpdateRequestStatus(req.id, "rejected", reason);
+                                        }
+                                      }}
+                                    >
+                                      Reject
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -4011,6 +4624,202 @@ export function AdminDashboardExperience() {
           user={selectedAdminUser}
           onClose={() => setSelectedAdminUser(null)}
         />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          ASSIGN MANAGER MODAL
+         ───────────────────────────────────────────────────────────── */}
+      {assigningRequest && (
+        <div className="mgr-modal-backdrop" onClick={() => !submittingAssignment && setAssigningRequest(null)}>
+          <div className="mgr-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px" }}>
+            <div className="mgr-modal-header">
+              <div>
+                <span className="eyebrow" style={{ color: "#7c3aed" }}>
+                  <UserCheck size={13} /> APPOINT DEDICATED CONCIERGE
+                </span>
+                <h3>Assign Manager to Request</h3>
+              </div>
+              <button
+                type="button"
+                className="mgr-modal-close"
+                onClick={() => setAssigningRequest(null)}
+                disabled={submittingAssignment}
+                aria-label="Close modal"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ background: "var(--surface-soft)", padding: "12px 14px", borderRadius: "8px", margin: "14px 0", fontSize: "12px" }}>
+              <div><strong>Owner:</strong> {assigningRequest.owner?.name || "Owner"} ({assigningRequest.ownerContactPhone || assigningRequest.owner?.phone || "No phone"})</div>
+              <div style={{ marginTop: "4px" }}><strong>Locality:</strong> {assigningRequest.locality || "Bengaluru"}</div>
+              <div style={{ marginTop: "4px" }}><strong>Selected Tier:</strong> {assigningRequest.managedTier === "premium" ? "⭐ Premium Listing (₹999)" : "Standard Listing (₹499)"}</div>
+            </div>
+
+            <form onSubmit={handleAssignManager}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
+                    Manager Full Name <span style={{ color: "#dc2626" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Priya Sharma, Rahul Verma, Anita Desai"
+                    value={managerNameInput}
+                    onChange={(e) => setManagerNameInput(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: "11px", color: "var(--muted)" }}>Quick pick:</span>
+                  {["Priya Sharma", "Rahul Verma", "Anita Desai", "Vikram Rathore"].map((name) => (
+                    <button
+                      type="button"
+                      key={name}
+                      className="queue-action-btn"
+                      style={{ padding: "2px 7px", fontSize: "10.5px" }}
+                      onClick={() => setManagerNameInput(name)}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ flex: 1 }}
+                    onClick={() => setAssigningRequest(null)}
+                    disabled={submittingAssignment}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ flex: 2 }}
+                    disabled={submittingAssignment || !managerNameInput.trim()}
+                  >
+                    {submittingAssignment ? "Assigning..." : "Assign & Notify Owner"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          VIEW / EDIT REQUEST DETAILS MODAL (Premium Polish)
+         ───────────────────────────────────────────────────────────── */}
+      {editingRequest && (
+        <div className="mgr-modal-backdrop" onClick={() => !savingRequestDetails && setEditingRequest(null)}>
+          <div className="mgr-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "560px" }}>
+            <div className="mgr-modal-header">
+              <div>
+                <span className="eyebrow" style={{ color: "#7c3aed" }}>
+                  <Sparkles size={13} /> LISTING OPTIMIZATION &amp; AUDIT
+                </span>
+                <h3>Inspect &amp; Polish Request Details</h3>
+              </div>
+              <button
+                type="button"
+                className="mgr-modal-close"
+                onClick={() => setEditingRequest(null)}
+                disabled={savingRequestDetails}
+                aria-label="Close modal"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", background: "var(--surface-soft)", padding: "12px 14px", borderRadius: "8px", margin: "14px 0", fontSize: "11.5px" }}>
+              <div><strong>Owner:</strong> {editingRequest.owner?.name || "Owner"}</div>
+              <div><strong>Phone:</strong> {editingRequest.ownerContactPhone || editingRequest.owner?.phone || "N/A"}</div>
+              <div><strong>Tier:</strong> {editingRequest.managedTier === "premium" ? "⭐ Premium Listing (₹999)" : "Standard Listing (₹499)"}</div>
+              <div><strong>Payment:</strong> {editingRequest.paymentStatus.toUpperCase()} ({editingRequest.transactionId || "N/A"})</div>
+            </div>
+
+            <form onSubmit={handleSaveRequestDetails}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
+                    Property Title
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editReqForm.propertyTitle}
+                    onChange={(e) => setEditReqForm({ ...editReqForm, propertyTitle: e.target.value })}
+                    placeholder="e.g. 2 BHK Sunlit Flat with Balcony"
+                  />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <div>
+                    <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
+                      Locality / Area
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editReqForm.locality}
+                      onChange={(e) => setEditReqForm({ ...editReqForm, locality: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
+                      City
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editReqForm.city}
+                      onChange={(e) => setEditReqForm({ ...editReqForm, city: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ display: "block", marginBottom: "4px" }}>
+                    Internal Manager Notes / Polish Comments
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows={3}
+                    value={editReqForm.notes}
+                    onChange={(e) => setEditReqForm({ ...editReqForm, notes: e.target.value })}
+                    placeholder="Notes on owner verification, call details, key highlights..."
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ flex: 1 }}
+                    onClick={() => setEditingRequest(null)}
+                    disabled={savingRequestDetails}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ flex: 2 }}
+                    disabled={savingRequestDetails}
+                  >
+                    {savingRequestDetails ? "Saving..." : "Save Polished Details"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </main>
   );

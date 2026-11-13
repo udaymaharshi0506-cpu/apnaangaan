@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight } from "lucide-react";
+import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles } from "lucide-react";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
 
@@ -167,7 +167,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
                     ) : (
                       <div className="notifications-items-list">
                         {recentNotifications.map((item) => {
-                          const IconComp = item.type === "meeting" ? CalendarDays : item.type === "interest" ? Heart : item.type === "listing" ? Home : Bell;
+                          const IconComp = item.type === "meeting" ? CalendarDays : item.type === "interest" ? Heart : item.type === "listing" ? Home : item.type === "manager_request" ? Sparkles : Bell;
                           return (
                             <Link
                               key={item.id}

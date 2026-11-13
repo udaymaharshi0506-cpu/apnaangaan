@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, pgView, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, integer, jsonb, numeric, pgEnum, pgTable, pgView, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const propertyCategory = pgEnum("property_category", ["rent_home"]);
@@ -79,6 +79,16 @@ export const properties = pgTable("properties", {
   rejectionReason: text("rejection_reason"),
   verified: boolean("verified").notNull().default(false),
   views: integer("views").notNull().default(0),
+  // Managed listing & service tier fields
+  listingMode: varchar("listing_mode", { length: 20 }).notNull().default("self"),
+  managedTier: varchar("managed_tier", { length: 20 }).notNull().default("none"),
+  feeAmount: numeric("fee_amount", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  paymentStatus: varchar("payment_status", { length: 30 }).notNull().default("not_required"),
+  transactionId: varchar("transaction_id", { length: 100 }),
+  isRecommended: boolean("is_recommended").notNull().default(false),
+  requestStatus: varchar("request_status", { length: 30 }).notNull().default("new"),
+  assignedManagerId: uuid("assigned_manager_id").references(() => users.id),
+  assignedManagerName: varchar("assigned_manager_name", { length: 150 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("properties_category_idx").on(table.category), index("properties_city_idx").on(table.city), index("properties_status_idx").on(table.status), index("properties_created_idx").on(table.createdAt)]);
@@ -220,8 +230,35 @@ export const uploadedImages = pgTable("uploaded_images", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("uploaded_images_created_idx").on(table.createdAt)]);
 
+export const managerRequests = pgTable("manager_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: uuid("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  propertyId: uuid("property_id").references(() => properties.id, { onDelete: "set null" }),
+  listingMode: varchar("listing_mode", { length: 20 }).notNull().default("managed"),
+  managedTier: varchar("managed_tier", { length: 20 }).notNull().default("standard"),
+  feeAmount: numeric("fee_amount", { precision: 10, scale: 2 }).notNull().default("499.00"),
+  paymentStatus: varchar("payment_status", { length: 30 }).notNull().default("paid"),
+  transactionId: varchar("transaction_id", { length: 100 }),
+  isRecommended: boolean("is_recommended").notNull().default(false),
+  requestStatus: varchar("request_status", { length: 30 }).notNull().default("new"),
+  assignedManagerId: uuid("assigned_manager_id").references(() => users.id),
+  assignedManagerName: varchar("assigned_manager_name", { length: 150 }),
+  propertyTitle: varchar("property_title", { length: 255 }),
+  locality: varchar("locality", { length: 120 }),
+  city: varchar("city", { length: 100 }),
+  ownerContactPhone: varchar("owner_contact_phone", { length: 25 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("manager_requests_owner_idx").on(table.ownerId),
+  index("manager_requests_status_idx").on(table.requestStatus),
+  index("manager_requests_created_idx").on(table.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type Property = typeof properties.$inferSelect;
+export type ManagerRequest = typeof managerRequests.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type OwnerInquiry = typeof ownerInquiryView.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;

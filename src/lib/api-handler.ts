@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { adminCallLogs, favorites, leadEvents, leads, meetings, notifications, otpChallenges, ownerInquiryView, properties, savedSearches, uploadedImages, users, type Lead, type Property, type User } from "@/db/schema";
+import { adminCallLogs, favorites, leadEvents, leads, managerRequests, meetings, notifications, otpChallenges, ownerInquiryView, properties, savedSearches, uploadedImages, users, type Lead, type ManagerRequest, type Property, type User } from "@/db/schema";
 import { attachAdminChallenge, attachSession, clearSession, getAuthUser, getPendingAdmin, hasRole, publicSelf, rotateSession, verifyAdminCode } from "@/lib/auth";
 import { findProperties, getProperty, getPropertyForLeadCreation, getUnavailablePropertyStatus, ownerPropertyColumns, publicPropertyColumns } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
@@ -286,6 +286,9 @@ const propertyRawFields = {
   genderPolicy: cleanText(50).nullable().optional(),
   houseRules: z.array(cleanText(100)).optional(),
   itemizedCharges: z.record(z.string(), z.unknown()).nullable().optional().transform((val) => (val === undefined ? undefined : val ?? {})),
+  listingMode: z.enum(["self", "managed"]).optional(),
+  managedTier: z.enum(["none", "standard", "premium"]).optional(),
+  isRecommended: z.boolean().optional(),
 };
 
 const propertyInput = z.object({
@@ -1040,6 +1043,9 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       itemizedCharges: input.itemizedCharges || {},
       status: "pending_review",
       verified: false,
+      listingMode: input.listingMode || "self",
+      managedTier: input.managedTier || "none",
+      isRecommended: Boolean(input.isRecommended),
     }).returning(ownerPropertyColumns);
     if (input.liveSelfieUrl || input.aadhaarCardUrl) {
       await db.update(users).set({
@@ -1047,7 +1053,45 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         aadhaarCardUrl: input.aadhaarCardUrl || undefined,
       }).where(eq(users.id, user.id));
     }
-    await sendNotification(user.id, "listing", `Your listing ${property.title} was submitted for verification.`, "/owner");
+
+    const modeLabel = input.listingMode === "managed" ? "Managed Listing" : "Self-Listing";
+    await sendNotification(user.id, "listing", `Your ${modeLabel} "${property.title}" was submitted for verification.`, "/owner");
+
+    // Real-time notification to all platform administrators
+    const adminUsers = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(sql`'admin' = ANY(roles) OR role = 'admin'`);
+    await Promise.all(
+      adminUsers.map((a) =>
+        sendNotification(
+          a.id,
+          "listing",
+          `🔔 New ${modeLabel} submitted by ${user.name || "Owner"} for "${property.title}".`,
+          "/admin?view=requests"
+        )
+      )
+    );
+
+    // Automatically record in manager_requests queue
+    await db
+      .insert(managerRequests)
+      .values({
+        ownerId: user.id,
+        propertyId: property.id,
+        listingMode: input.listingMode || "self",
+        managedTier: input.managedTier || "none",
+        feeAmount: "0.00",
+        paymentStatus: "not_required",
+        isRecommended: Boolean(input.isRecommended),
+        requestStatus: "new",
+        propertyTitle: property.title,
+        locality: property.locality,
+        city: property.city,
+        ownerContactPhone: user.phone,
+      })
+      .catch(() => null);
+
     return respond({ property: serializePublicProperty(property), status: property.status, message: "Listing submitted for verification." }, 201);
   }
   if (segments[0] === "properties" && segments.length === 2 && ["PATCH", "DELETE"].includes(method)) {
@@ -1235,6 +1279,89 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       fail(403, "You do not have permission to view this listing.");
     }
     return respond({ property: row });
+  }
+
+  if (route === "owner/manager-requests" && method === "POST") {
+    const user = await requireRole(request, "owner");
+    let json: Record<string, unknown>;
+    try {
+      json = (await request.json()) as Record<string, unknown>;
+    } catch {
+      throw new HttpError(400, "Invalid JSON payload.");
+    }
+
+    const managedTier = json.managedTier === "premium" ? "premium" : "standard";
+    const listingMode = "managed";
+    const feeAmount = managedTier === "premium" ? "999.00" : "499.00";
+    const tierLabel = managedTier === "premium" ? "Premium Listing (₹999)" : "Standard Listing (₹499)";
+    const isRecommended = managedTier === "premium";
+    const propertyTitle = typeof json.propertyTitle === "string" ? json.propertyTitle.trim() : null;
+    const locality = typeof json.locality === "string" ? json.locality.trim() : null;
+    const city = typeof json.city === "string" ? json.city.trim() : (user.city || "Bengaluru");
+    const ownerContactPhone = typeof json.ownerContactPhone === "string" && json.ownerContactPhone.trim() ? json.ownerContactPhone.trim() : (user.phone || null);
+    const notes = typeof json.notes === "string" ? json.notes.trim() : null;
+    const propertyId = typeof json.propertyId === "string" ? json.propertyId : null;
+    const transactionId = "TXN_MGR_" + Math.random().toString(36).substring(2, 9).toUpperCase() + "_" + Date.now().toString().slice(-4);
+
+    const [created] = await db
+      .insert(managerRequests)
+      .values({
+        ownerId: user.id,
+        propertyId,
+        listingMode,
+        managedTier,
+        feeAmount,
+        paymentStatus: "paid",
+        transactionId,
+        isRecommended,
+        requestStatus: "new",
+        propertyTitle: propertyTitle || (locality ? `Rental home in ${locality}` : "Rental Home"),
+        locality: locality || "Locality pending",
+        city,
+        ownerContactPhone,
+        notes,
+      })
+      .returning();
+
+    // 1. Immediate Owner notification (toast on frontend + persistent bell notification)
+    await sendNotification(
+      user.id,
+      "manager_request",
+      `Your Hire a Manager request (${tierLabel}) has been confirmed! An Apna Aangan manager will contact you shortly.`,
+      "/owner"
+    );
+
+    // 2. Real-time Admin notification to all administrators
+    const adminUsers = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(sql`'admin' = ANY(roles) OR role = 'admin'`);
+
+    const adminMessage = `🔔 New Hire a Manager Request: ${user.name || "Owner"} (${ownerContactPhone || "No phone"}) selected ${tierLabel} for ${propertyTitle || locality || "a rental property"}.`;
+    await Promise.all(
+      adminUsers.map((admin) =>
+        sendNotification(admin.id, "manager_request", adminMessage, `/admin?view=requests&id=${created.id}`)
+      )
+    );
+
+    return respond(
+      {
+        request: created,
+        message: `Your Hire a Manager request (${tierLabel}) has been submitted successfully! An Apna Aangan manager will reach out to you.`,
+      },
+      201
+    );
+  }
+
+  if (route === "owner/manager-requests" && method === "GET") {
+    const user = await requireRole(request, "owner");
+    const items = await db
+      .select()
+      .from(managerRequests)
+      .where(eq(managerRequests.ownerId, user.id))
+      .orderBy(desc(managerRequests.createdAt))
+      .limit(50);
+    return respond({ items });
   }
 
   // Lead creation never returns owner contact information; owner notifications are anonymous.
@@ -2258,8 +2385,207 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       });
     }
 
+    if (route === "admin/manager-requests" && method === "GET") {
+      const q = params.get("q")?.trim();
+      const statusFilter = params.get("status")?.trim();
+      const tierFilter = params.get("tier")?.trim();
+      const modeFilter = params.get("mode")?.trim();
+      const page = pageFrom(request);
+      const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 30));
+
+      const conditions: any[] = [];
+      if (statusFilter && statusFilter !== "all") {
+        conditions.push(eq(managerRequests.requestStatus, statusFilter));
+      }
+      if (tierFilter && tierFilter !== "all") {
+        conditions.push(eq(managerRequests.managedTier, tierFilter));
+      }
+      if (modeFilter && modeFilter !== "all") {
+        conditions.push(eq(managerRequests.listingMode, modeFilter));
+      }
+      if (q) {
+        conditions.push(
+          or(
+            ilike(managerRequests.propertyTitle, `%${q}%`),
+            ilike(managerRequests.locality, `%${q}%`),
+            ilike(managerRequests.city, `%${q}%`),
+            ilike(managerRequests.ownerContactPhone, `%${q}%`),
+            ilike(users.name, `%${q}%`),
+            ilike(users.email, `%${q}%`),
+            ilike(users.phone, `%${q}%`)
+          )
+        );
+      }
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [items, [{ total }], allRows] = await Promise.all([
+        db
+          .select({
+            id: managerRequests.id,
+            ownerId: managerRequests.ownerId,
+            propertyId: managerRequests.propertyId,
+            listingMode: managerRequests.listingMode,
+            managedTier: managerRequests.managedTier,
+            feeAmount: managerRequests.feeAmount,
+            paymentStatus: managerRequests.paymentStatus,
+            transactionId: managerRequests.transactionId,
+            isRecommended: managerRequests.isRecommended,
+            requestStatus: managerRequests.requestStatus,
+            assignedManagerId: managerRequests.assignedManagerId,
+            assignedManagerName: managerRequests.assignedManagerName,
+            propertyTitle: managerRequests.propertyTitle,
+            locality: managerRequests.locality,
+            city: managerRequests.city,
+            ownerContactPhone: managerRequests.ownerContactPhone,
+            notes: managerRequests.notes,
+            createdAt: managerRequests.createdAt,
+            updatedAt: managerRequests.updatedAt,
+            owner: {
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              phone: users.phone,
+            },
+          })
+          .from(managerRequests)
+          .innerJoin(users, eq(managerRequests.ownerId, users.id))
+          .where(where)
+          .orderBy(desc(managerRequests.createdAt))
+          .limit(limit)
+          .offset((page - 1) * limit),
+        db
+          .select({ total: count() })
+          .from(managerRequests)
+          .innerJoin(users, eq(managerRequests.ownerId, users.id))
+          .where(where),
+        db
+          .select({
+            status: managerRequests.requestStatus,
+            tier: managerRequests.managedTier,
+            fee: managerRequests.feeAmount,
+          })
+          .from(managerRequests),
+      ]);
+
+      const stats = {
+        total: allRows.length,
+        newCount: allRows.filter((r) => r.status === "new").length,
+        assignedCount: allRows.filter((r) => r.status === "assigned").length,
+        inReviewCount: allRows.filter((r) => r.status === "in_review").length,
+        publishedCount: allRows.filter((r) => r.status === "published").length,
+        standardCount: allRows.filter((r) => r.tier === "standard").length,
+        premiumCount: allRows.filter((r) => r.tier === "premium").length,
+        totalRevenue: allRows.reduce((acc, r) => acc + (Number(r.fee) || 0), 0),
+      };
+
+      return respond({ items, total, stats, page, pages: Math.ceil(total / limit) });
+    }
+
+    if (segments[1] === "manager-requests" && segments.length === 3 && method === "PATCH") {
+      const id = validId(segments[2]);
+      const [existing] = await db
+        .select()
+        .from(managerRequests)
+        .where(eq(managerRequests.id, id))
+        .limit(1);
+      if (!existing) fail(404, "Manager request not found.");
+
+      let bodyJson: Record<string, unknown>;
+      try {
+        bodyJson = (await request.json()) as Record<string, unknown>;
+      } catch {
+        throw new HttpError(400, "Invalid JSON payload.");
+      }
+
+      const updates: Partial<typeof managerRequests.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+
+      const action = String(bodyJson.action || "update_status");
+      const tierLabel = existing.managedTier === "premium" ? "Premium Listing (₹999)" : "Standard Listing (₹499)";
+
+      if (action === "assign_manager") {
+        const managerName = String(bodyJson.managerName || "").trim();
+        if (!managerName) fail(400, "Manager name is required for assignment.");
+        updates.assignedManagerName = managerName;
+        updates.requestStatus = "assigned";
+        if (typeof bodyJson.managerId === "string") {
+          updates.assignedManagerId = bodyJson.managerId;
+        }
+
+        // Send status update notification to owner
+        await sendNotification(
+          existing.ownerId,
+          "manager_request",
+          `Manager ${managerName} has been assigned to your ${tierLabel} request. They will coordinate your property listing.`,
+          "/owner"
+        );
+      } else if (action === "toggle_recommended") {
+        const nextRecommended = Boolean(bodyJson.isRecommended);
+        updates.isRecommended = nextRecommended;
+
+        if (existing.propertyId) {
+          await db
+            .update(properties)
+            .set({ isRecommended: nextRecommended, updatedAt: new Date() })
+            .where(eq(properties.id, existing.propertyId));
+        }
+      } else if (action === "update_details") {
+        if (typeof bodyJson.propertyTitle === "string") updates.propertyTitle = bodyJson.propertyTitle.trim();
+        if (typeof bodyJson.locality === "string") updates.locality = bodyJson.locality.trim();
+        if (typeof bodyJson.city === "string") updates.city = bodyJson.city.trim();
+        if (typeof bodyJson.notes === "string") updates.notes = bodyJson.notes.trim();
+      } else {
+        const newStatus = String(bodyJson.status || existing.requestStatus);
+        const validStatuses = ["new", "assigned", "in_review", "published", "rejected"];
+        if (!validStatuses.includes(newStatus)) {
+          fail(400, `Invalid request status. Expected one of: ${validStatuses.join(", ")}`);
+        }
+        updates.requestStatus = newStatus;
+        if (typeof bodyJson.notes === "string") updates.notes = bodyJson.notes.trim();
+
+        if (newStatus === "in_review") {
+          await sendNotification(
+            existing.ownerId,
+            "manager_request",
+            `Your ${tierLabel} verification and listing optimization is currently in progress.`,
+            "/owner"
+          );
+        } else if (newStatus === "published") {
+          await sendNotification(
+            existing.ownerId,
+            "manager_request",
+            `Your managed listing is now published and live on Apna Aangan!`,
+            "/owner"
+          );
+          if (existing.propertyId) {
+            await db
+              .update(properties)
+              .set({ status: "live", verified: true, isRecommended: existing.isRecommended, updatedAt: new Date() })
+              .where(eq(properties.id, existing.propertyId));
+          }
+        } else if (newStatus === "rejected") {
+          await sendNotification(
+            existing.ownerId,
+            "manager_request",
+            `Update on your ${tierLabel} request: ${bodyJson.notes || "Listing could not be approved. Please review details."}`,
+            "/owner"
+          );
+        }
+      }
+
+      const [updated] = await db
+        .update(managerRequests)
+        .set(updates)
+        .where(eq(managerRequests.id, id))
+        .returning();
+
+      return respond({ request: updated, message: "Manager request updated successfully." });
+    }
+
     if (route === "admin/dashboard/stats" && method === "GET") {
-      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], [{ totalUsers }], [{ totalOwners }], [{ seekerCount }], recent] = await Promise.all([
+      const [listingCounts, statusCounts, [{ total: inquiryTotal }], [{ pending }], [{ totalAll: totalListings }], [{ totalUsers }], [{ totalOwners }], [{ seekerCount }], [{ totalManagerRequests }], [{ newManagerRequests }], recent] = await Promise.all([
         db.select({ category: properties.category, total: count() }).from(properties).where(and(eq(properties.status, "live"), eq(properties.category, "rent_home"))).groupBy(properties.category),
         db.select({ status: leads.status, total: count() }).from(leads).groupBy(leads.status),
         db.select({ total: count() }).from(leads),
@@ -2268,6 +2594,8 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         db.select({ totalUsers: count() }).from(users),
         db.select({ totalOwners: count() }).from(users).where(and(sql`${users.roles}::jsonb ? 'owner'`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
         db.select({ seekerCount: count() }).from(users).where(and(sql`NOT (${users.roles}::jsonb ? 'owner')`, sql`NOT (${users.roles}::jsonb ? 'admin')`)),
+        db.select({ totalManagerRequests: count() }).from(managerRequests),
+        db.select({ newManagerRequests: count() }).from(managerRequests).where(eq(managerRequests.requestStatus, "new")),
         db.select({ createdAt: leads.createdAt }).from(leads).where(gte(leads.createdAt, new Date(Date.now() - 7 * 86400000))),
       ]);
       const byDay = Array.from({ length: 7 }, (_, i) => {
@@ -2283,6 +2611,8 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         totalUsers,
         seekerCount,
         ownerCount: totalOwners,
+        managerRequestsCount: totalManagerRequests,
+        newManagerRequestsCount: newManagerRequests,
         inquiriesByDay: byDay,
         conversionRate: inquiryTotal ? Math.round(((statusCounts.find((item) => item.status === "closed_won")?.total || 0) / inquiryTotal) * 100) : 0,
       });

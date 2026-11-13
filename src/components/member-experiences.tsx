@@ -204,9 +204,10 @@ export function InquiriesExperience() {
 export function OwnerExperience() {
   const { user, loading, refreshUser, toast } = useApp();
   const router = useRouter();
-  const [tab, setTab] = useState<"listings" | "interests">("listings");
+  const [tab, setTab] = useState<"listings" | "interests" | "managed">("listings");
   const [listings, setListings] = useState<OwnerListing[]>([]);
   const [interests, setInterests] = useState<AnonymousInterest[]>([]);
+  const [managedRequests, setManagedRequests] = useState<any[]>([]);
   const [fetching, setFetching] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -216,8 +217,14 @@ export function OwnerExperience() {
     if (!isOwner) { setFetching(false); return; }
     setLoadError("");
     try {
-      const [propertyData, interestData] = await Promise.all([apiFetch<{ items: OwnerListing[] }>("/api/owner/properties"), apiFetch<{ items: AnonymousInterest[] }>("/api/owner/leads")]);
-      setListings(propertyData.items); setInterests(interestData.items);
+      const [propertyData, interestData, managerData] = await Promise.all([
+        apiFetch<{ items: OwnerListing[] }>("/api/owner/properties"),
+        apiFetch<{ items: AnonymousInterest[] }>("/api/owner/leads"),
+        apiFetch<{ items: any[] }>("/api/owner/manager-requests").catch(() => ({ items: [] })),
+      ]);
+      setListings(propertyData.items);
+      setInterests(interestData.items);
+      setManagedRequests(managerData.items || []);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Couldn't load your owner dashboard. Check connection and tap Retry.";
       setLoadError(msg);
@@ -333,7 +340,64 @@ export function OwnerExperience() {
   if (!loading && user && !isOwner) return <main className="member-page"><div className="container"><div className="upgrade-card"><span className="upgrade-icon"><KeyRound size={31}/></span><span className="eyebrow">FOR PROPERTY OWNERS</span><h1>Have a place to share?</h1><p>Activate your owner space to post a verified listing, see how it performs, and receive interest notifications — with everyone&apos;s privacy protected.</p><button onClick={() => void upgrade()} disabled={upgrading} className="btn btn-primary">{upgrading ? "Activating..." : "Become a property owner"} <ArrowRight size={18}/></button></div></div></main>;
   const live = listings.filter((item) => item.status === "live").length;
   const totalViews = listings.reduce((sum, item) => sum + item.views, 0);
-  return <main className="member-page owner-page"><div className="container"><PageIntro eyebrow="YOUR OWNER SPACE" title={`Welcome back${user?.name ? `, ${user.name.split(" ")[0]}` : ""}.`} text="Manage your spaces and stay in the loop, all in one calm place." action={<Link href="/post-property" className="btn btn-primary"><Plus size={18}/> Post a property</Link>}/>{loadError && <LoadErrorBanner message={loadError} onRetry={() => void load()}/>}<div className="owner-stats"><div><span className="owner-stat-icon"><Home size={20}/></span><strong>{listings.length}</strong><small>Total listings</small></div><div><span className="owner-stat-icon"><BadgeCheck size={20}/></span><strong>{live}</strong><small>Live & verified</small></div><div><span className="owner-stat-icon"><Eye size={20}/></span><strong>{totalViews}</strong><small>Property views</small></div><div><span className="owner-stat-icon"><Heart size={20}/></span><strong>{interests.length}</strong><small>Interested people</small></div></div><div className="owner-tabs"><button className={tab === "listings" ? "active" : ""} onClick={() => setTab("listings")}>My listings <span>{listings.length}</span></button><button className={tab === "interests" ? "active" : ""} onClick={() => setTab("interests")}>Interest notifications <span>{interests.length}</span></button></div>{fetching ? <div className="loading-cards">Loading your dashboard...</div> : tab === "listings" ? listings.length ? <div className="owner-listing-list">{listings.map((item) => <article className="owner-listing" key={item.id}><Link href={item.status === "live" ? `/property/${item.id}` : `/post-property?edit=${item.id}`} className="owner-listing-photo"><img src={item.images[0] || ""} alt=""/></Link><div className="owner-listing-info"><span className="owner-listing-type">{item.propertyType} · {item.locality}</span><h3>{item.title}</h3><strong>{formatPrice(item.price, item.category)}</strong><div className="owner-listing-metrics"><span><Eye size={15}/> {item.views} views</span><span><Heart size={15}/> {item.inquiryCount} interests</span></div></div><div className="owner-listing-actions"><span className={`status-pill status-${item.status}`}>{item.status.replaceAll("_", " ")}</span><div><Link href={`/post-property?edit=${item.id}`} className="btn btn-outline" style={{ fontSize: "11px", padding: "4px 10px", height: "auto" }}>{item.status === "draft" ? "Continue draft" : "Edit"}</Link>{item.status === "live" && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "paused")}>Pause</button>}{(item.status === "paused" || item.status === "rented") && item.verified && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "live")}>Go live</button>}{item.status === "live" && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "rented")}>Mark rented</button>}<button disabled={busyActionId === item.id} onClick={() => void deleteListing(item.id, item.title)} style={{ color: "#ef4444" }}>Delete</button></div></div>{(item.status === "rejected" || item.rejectionReason) && <div style={{ gridColumn: "1 / -1", width: "100%", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "12px 14px", marginTop: "10px" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#b91c1c", fontWeight: 700, fontSize: "12.5px" }}><AlertTriangle size={16}/> Listing Not Approved by Moderation Team</div><span style={{ fontSize: "10px", background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "4px", fontWeight: 700 }}>Action Required</span></div><div style={{ margin: "6px 0 10px", fontSize: "12px", color: "#7f1d1d", lineHeight: "1.5" }}><strong>Reason:</strong> {item.rejectionReason || "Listing details or KYC verification documents did not meet our verification guidelines."}</div><div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}><button disabled={busyActionId === item.id} onClick={() => void resubmitListing(item.id)} className="btn btn-primary" style={{ background: "#dc2626", borderColor: "#dc2626", fontSize: "11px", padding: "6px 14px", fontWeight: 600 }}>Resubmit for Review</button><Link href={`/post-property?edit=${item.id}`} className="btn btn-outline" style={{ fontSize: "11px", padding: "6px 12px" }}>Edit & Fix</Link></div></div>}</article>)}</div> : <EmptyState icon={Home} title="Your first listing starts here" text="Share a few details and photos. Our team will review your property before it goes live." href="/post-property" cta="Post a property"/> : interests.length ? (
+  return <main className="member-page owner-page"><div className="container"><PageIntro eyebrow="YOUR OWNER SPACE" title={`Welcome back${user?.name ? `, ${user.name.split(" ")[0]}` : ""}.`} text="Manage your spaces and stay in the loop, all in one calm place." action={<Link href="/post-property" className="btn btn-primary"><Plus size={18}/> Post a property</Link>}/>{loadError && <LoadErrorBanner message={loadError} onRetry={() => void load()}/>}<div className="owner-stats"><div><span className="owner-stat-icon"><Home size={20}/></span><strong>{listings.length}</strong><small>Total listings</small></div><div><span className="owner-stat-icon"><BadgeCheck size={20}/></span><strong>{live}</strong><small>Live & verified</small></div><div><span className="owner-stat-icon"><Sparkles size={20}/></span><strong>{managedRequests.length}</strong><small>Managed requests</small></div><div><span className="owner-stat-icon"><Heart size={20}/></span><strong>{interests.length}</strong><small>Interested people</small></div></div><div className="owner-tabs"><button className={tab === "listings" ? "active" : ""} onClick={() => setTab("listings")}>My listings <span>{listings.length}</span></button><button className={tab === "managed" ? "active" : ""} onClick={() => setTab("managed")}>Managed requests <span>{managedRequests.length}</span></button><button className={tab === "interests" ? "active" : ""} onClick={() => setTab("interests")}>Interest notifications <span>{interests.length}</span></button></div>{fetching ? <div className="loading-cards">Loading your dashboard...</div> : tab === "listings" ? listings.length ? <div className="owner-listing-list">{listings.map((item) => <article className="owner-listing" key={item.id}><Link href={item.status === "live" ? `/property/${item.id}` : `/post-property?edit=${item.id}`} className="owner-listing-photo"><img src={item.images[0] || ""} alt=""/></Link><div className="owner-listing-info"><span className="owner-listing-type">{item.propertyType} · {item.locality}</span><h3>{item.title}</h3><strong>{formatPrice(item.price, item.category)}</strong><div className="owner-listing-metrics"><span><Eye size={15}/> {item.views} views</span><span><Heart size={15}/> {item.inquiryCount} interests</span></div></div><div className="owner-listing-actions"><span className={`status-pill status-${item.status}`}>{item.status.replaceAll("_", " ")}</span><div><Link href={`/post-property?edit=${item.id}`} className="btn btn-outline" style={{ fontSize: "11px", padding: "4px 10px", height: "auto" }}>{item.status === "draft" ? "Continue draft" : "Edit"}</Link>{item.status === "live" && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "paused")}>Pause</button>}{(item.status === "paused" || item.status === "rented") && item.verified && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "live")}>Go live</button>}{item.status === "live" && <button disabled={busyActionId === item.id} onClick={() => void changeStatus(item.id, "rented")}>Mark rented</button>}<button disabled={busyActionId === item.id} onClick={() => void deleteListing(item.id, item.title)} style={{ color: "#ef4444" }}>Delete</button></div></div>{(item.status === "rejected" || item.rejectionReason) && <div style={{ gridColumn: "1 / -1", width: "100%", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "12px 14px", marginTop: "10px" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#b91c1c", fontWeight: 700, fontSize: "12.5px" }}><AlertTriangle size={16}/> Listing Not Approved by Moderation Team</div><span style={{ fontSize: "10px", background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "4px", fontWeight: 700 }}>Action Required</span></div><div style={{ margin: "6px 0 10px", fontSize: "12px", color: "#7f1d1d", lineHeight: "1.5" }}><strong>Reason:</strong> {item.rejectionReason || "Listing details or KYC verification documents did not meet our verification guidelines."}</div><div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}><button disabled={busyActionId === item.id} onClick={() => void resubmitListing(item.id)} className="btn btn-primary" style={{ background: "#dc2626", borderColor: "#dc2626", fontSize: "11px", padding: "6px 14px", fontWeight: 600 }}>Resubmit for Review</button><Link href={`/post-property?edit=${item.id}`} className="btn btn-outline" style={{ fontSize: "11px", padding: "6px 12px" }}>Edit & Fix</Link></div></div>}</article>)}</div> : <EmptyState icon={Home} title="Your first listing starts here" text="Share a few details and photos. Our team will review your property before it goes live." href="/post-property" cta="Post a property"/> : tab === "managed" ? (
+  managedRequests.length ? (
+    <div className="owner-listing-list">
+      {managedRequests.map((req) => (
+        <article className="owner-listing" key={req.id}>
+          <div className="owner-listing-photo" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: req.managedTier === "premium" ? "linear-gradient(135deg, #fefce8, #fef3c7)" : "linear-gradient(135deg, #f0fdf4, #dcfce7)", color: req.managedTier === "premium" ? "#b45309" : "#15803d" }}>
+            <Sparkles size={34} />
+          </div>
+          <div className="owner-listing-info">
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "4px" }}>
+              <span className={`queue-badge-tier ${req.managedTier === "premium" ? "queue-tier-premium" : req.managedTier === "standard" ? "queue-tier-standard" : "queue-tier-none"}`}>
+                {req.managedTier === "premium" ? "⭐ Premium Listing (₹999)" : req.managedTier === "standard" ? "Standard Listing (₹499)" : "Self-Listing"}
+              </span>
+              {req.isRecommended && (
+                <span className="rec-flag" style={{ fontSize: "10px", background: "#fef08a", color: "#854d0e", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                  ⭐ Boosted
+                </span>
+              )}
+            </div>
+            <h3>{req.propertyTitle || `Property in ${req.locality || req.city || "Bengaluru"}`}</h3>
+            <strong>Fee Paid: ₹{req.feeAmount}</strong>
+            <div style={{ fontSize: "12px", color: "var(--muted)", margin: "4px 0" }}>
+              📍 {req.locality ? `${req.locality}, ` : ""}{req.city || "Bengaluru"} · Ref: <span style={{ fontFamily: "monospace" }}>{req.transactionId || req.id.slice(0, 8)}</span>
+            </div>
+            <div style={{ background: "var(--surface-soft)", padding: "8px 12px", borderRadius: "6px", fontSize: "12px", marginTop: "6px" }}>
+              {req.assignedManagerName ? (
+                <span>👤 <strong>Assigned Manager:</strong> {req.assignedManagerName} (Will coordinate your photos &amp; listing)</span>
+              ) : (
+                <span style={{ color: "#d97706" }}>⏳ <strong>Manager Assignment in Progress:</strong> Apna Aangan team is assigning a dedicated manager.</span>
+              )}
+            </div>
+          </div>
+          <div className="owner-listing-actions">
+            <span className={`status-pill status-${req.requestStatus}`}>
+              {req.requestStatus === "new" ? "New Request" : req.requestStatus === "assigned" ? "Manager Assigned" : req.requestStatus === "in_review" ? "In Review / Polishing" : req.requestStatus === "published" ? "Live on Site" : req.requestStatus}
+            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+              <small style={{ color: "var(--muted)", fontSize: "11px" }}>Submitted {niceDate(req.createdAt)}</small>
+              {req.propertyId && (
+                <Link href={`/property/${req.propertyId}`} className="btn btn-outline" style={{ fontSize: "11px", padding: "4px 10px" }}>
+                  View Live Listing
+                </Link>
+              )}
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  ) : (
+    <EmptyState
+      icon={Sparkles}
+      title="No managed listing requests yet"
+      text="Hire an Apna Aangan manager to handle your photos, specs, pricing, and tenant calls with zero hassle."
+      href="/post-property"
+      cta="Hire a Manager"
+    />
+  )
+) : interests.length ? (
   <div className="owner-interest-list">
     <div className="owner-privacy-note">
       <LockKeyhole size={19}/>
@@ -463,7 +527,7 @@ export function NotificationsExperience() {
     setItems((old) => old.map((item) => item.id === id ? { ...item, isRead: true } : item));
   }
   if (!loading && !user) return <main className="member-page"><div className="container"><AccountGate title="Your updates live here." description="Log in to see property updates and coordinated viewing notifications." icon={Bell}/></div></main>;
-  return <main className="member-page"><div className="container"><PageIntro eyebrow="STAY IN THE LOOP" title="Notifications" text="The things worth knowing, without the noise." action={items.some((item) => !item.isRead) ? <button disabled={markingAll} onClick={() => void readAll()} className="btn btn-outline"><Check size={17}/> {markingAll ? "Updating..." : "Mark all as read"}</button> : undefined}/>{loadError && <LoadErrorBanner message={loadError} onRetry={() => void load()}/>}{fetching ? <div className="loading-cards">Loading updates...</div> : items.length ? <div className="notifications-list">{items.map((item) => <Link href={item.link || "/notifications"} key={item.id} onClick={() => void markRead(item.id)} className={`notification-row ${item.isRead ? "" : "unread"}`}><span className="notification-icon">{item.type === "meeting" ? <CalendarDays size={21}/> : item.type === "interest" ? <Heart size={21}/> : item.type === "listing" ? <Home size={21}/> : <Bell size={21}/>}</span><div><strong>{item.message}</strong><small>{niceDate(item.createdAt)}</small></div>{!item.isRead && <span className="unread-dot"/>}<ChevronRight size={17}/></Link>)}</div> : !loadError ? <EmptyState icon={Bell} title="All quiet for now" text="We&apos;ll let you know when there&apos;s an update on your places or inquiries." href="/search" cta="Keep exploring"/> : null}</div></main>;
+  return <main className="member-page"><div className="container"><PageIntro eyebrow="STAY IN THE LOOP" title="Notifications" text="The things worth knowing, without the noise." action={items.some((item) => !item.isRead) ? <button disabled={markingAll} onClick={() => void readAll()} className="btn btn-outline"><Check size={17}/> {markingAll ? "Updating..." : "Mark all as read"}</button> : undefined}/>{loadError && <LoadErrorBanner message={loadError} onRetry={() => void load()}/>}{fetching ? <div className="loading-cards">Loading updates...</div> : items.length ? <div className="notifications-list">{items.map((item) => <Link href={item.link || "/notifications"} key={item.id} onClick={() => void markRead(item.id)} className={`notification-row ${item.isRead ? "" : "unread"}`}><span className="notification-icon">{item.type === "meeting" ? <CalendarDays size={21}/> : item.type === "interest" ? <Heart size={21}/> : item.type === "listing" ? <Home size={21}/> : item.type === "manager_request" ? <Sparkles size={21}/> : <Bell size={21}/>}</span><div><strong>{item.message}</strong><small>{niceDate(item.createdAt)}</small></div>{!item.isRead && <span className="unread-dot"/>}<ChevronRight size={17}/></Link>)}</div> : !loadError ? <EmptyState icon={Bell} title="All quiet for now" text="We&apos;ll let you know when there&apos;s an update on your places or inquiries." href="/search" cta="Keep exploring"/> : null}</div></main>;
 }
 
 export function ProfileExperience() {

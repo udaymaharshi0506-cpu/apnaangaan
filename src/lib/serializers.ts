@@ -13,8 +13,17 @@ export type PublicPropertyInput = Omit<
   | "rejectionReason"
   | "status"
   | "updatedAt"
+  | "listingMode"
+  | "managedTier"
+  | "feeAmount"
+  | "paymentStatus"
+  | "transactionId"
+  | "isRecommended"
+  | "requestStatus"
+  | "assignedManagerId"
+  | "assignedManagerName"
 > &
-  Partial<Pick<Property, "ownerId" | "address" | "status" | "updatedAt">>;
+  Partial<Pick<Property, "ownerId" | "address" | "status" | "updatedAt" | "listingMode" | "managedTier" | "isRecommended">>;
 
 export type CustomerLeadInput = Pick<
   Lead,
@@ -76,6 +85,7 @@ export function serializePublicProperty(property: PublicPropertyInput) {
     houseRules: property.houseRules,
     itemizedCharges: property.itemizedCharges,
     verified: property.verified,
+    isRecommended: property.isRecommended ?? false,
     createdAt: property.createdAt,
   };
 }
