@@ -170,3 +170,4 @@ test("Rule 2C & Rule 3: Managed listing fees & deposit separation in revenue vs 
   assert.equal(totalDebits, 5000);
   assert.equal(netAccountBalance, 115999 - 5000, "Money in account must be 110999");
 });
+

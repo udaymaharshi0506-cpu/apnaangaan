@@ -2643,4 +2643,282 @@
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   ADMIN RENTAL LEDGER: PROPER BOX-TYPE MODAL STYLES
+   ───────────────────────────────────────────────────────────── */
+.ledger-modal-backdrop,
+.admin-rental-ledger-root .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.ledger-modal-card,
+.admin-rental-ledger-root .modal-card {
+  position: relative;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 25px 65px -12px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-sizing: border-box;
+  animation: ledgerModalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ledgerModalPop {
+  from {
+    transform: scale(0.96) translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.ledger-modal-header,
+.admin-rental-ledger-root .modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ledger-modal-header h3,
+.admin-rental-ledger-root .modal-header h3 {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.4px;
+}
+
+.ledger-modal-header p,
+.admin-rental-ledger-root .modal-header p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ledger-modal-close,
+.admin-rental-ledger-root .modal-close {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  padding: 0;
+  margin-top: -2px;
+}
+
+.ledger-modal-close:hover,
+.admin-rental-ledger-root .modal-close:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  transform: rotate(90deg);
+}
+
+.ledger-modal-banner,
+.admin-rental-ledger-root .modal-deal-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ledger-modal-banner strong,
+.admin-rental-ledger-root .modal-deal-banner strong {
+  font-size: 13.5px;
+  color: #166534;
+  font-weight: 700;
+}
+
+.ledger-modal-banner small,
+.admin-rental-ledger-root .modal-deal-banner small {
+  font-size: 12px;
+  color: #15803d;
+}
+
+.ledger-modal-form,
+.admin-rental-ledger-root .modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ledger-form-grid,
+.admin-rental-ledger-root .form-group-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 600px) {
+  .ledger-form-grid,
+  .admin-rental-ledger-root .form-group-grid {
+    grid-template-columns: 1fr;
+  }
+  .ledger-modal-card,
+  .admin-rental-ledger-root .modal-card {
+    padding: 20px;
+    border-radius: 16px;
+  }
+}
+
+.ledger-modal-form label,
+.admin-rental-ledger-root .modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ledger-modal-form label > span,
+.admin-rental-ledger-root .modal-form label > span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ledger-modal-form input,
+.ledger-modal-form select,
+.ledger-modal-form textarea,
+.admin-rental-ledger-root .modal-form input,
+.admin-rental-ledger-root .modal-form select,
+.admin-rental-ledger-root .modal-form textarea {
+  width: 100%;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  height: 44px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: #0f172a;
+  background: #f8fafc;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.ledger-modal-form textarea,
+.admin-rental-ledger-root .modal-form textarea {
+  height: auto;
+  min-height: 76px;
+  padding: 10px 14px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.ledger-modal-form input:hover,
+.ledger-modal-form select:hover,
+.ledger-modal-form textarea:hover,
+.admin-rental-ledger-root .modal-form input:hover,
+.admin-rental-ledger-root .modal-form select:hover,
+.admin-rental-ledger-root .modal-form textarea:hover {
+  background: #ffffff;
+  border-color: #94a3b8;
+}
+
+.ledger-modal-form input:focus,
+.ledger-modal-form select:focus,
+.ledger-modal-form textarea:focus,
+.admin-rental-ledger-root .modal-form input:focus,
+.admin-rental-ledger-root .modal-form select:focus,
+.admin-rental-ledger-root .modal-form textarea:focus {
+  background: #ffffff;
+  border-color: #065f46;
+  box-shadow: 0 0 0 3px rgba(6, 95, 70, 0.14);
+}
+
+.ledger-modal-actions,
+.admin-rental-ledger-root .modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.btn-modal-cancel {
+  height: 42px;
+  padding: 0 20px;
+  border-radius: 10px;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-modal-cancel:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.btn-modal-submit {
+  height: 42px;
+  padding: 0 24px;
+  border-radius: 10px;
+  border: none;
+  background: #064e3b;
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(6, 78, 59, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-modal-submit:hover:not(:disabled) {
+  background: #04382a;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(6, 78, 59, 0.28);
+}
+
+.btn-modal-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
 

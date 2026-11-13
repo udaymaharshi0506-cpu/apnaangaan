@@ -1598,27 +1598,27 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
           MODAL 1: RECORD PAYMENT / TRANSACTION
          ───────────────────────────────────────────────────────────── */}
       {paymentModalOpen && (
-        <div className="modal-backdrop" onClick={() => setPaymentModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-            <div className="modal-header">
+        <div className="ledger-modal-backdrop" onClick={() => setPaymentModalOpen(false)}>
+          <div className="ledger-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div className="ledger-modal-header">
               <div>
                 <h3>Record Payment / Transaction</h3>
                 <p>Log verified cash, UPI, or bank deposit directly to the account ledger.</p>
               </div>
-              <button className="modal-close" onClick={() => setPaymentModalOpen(false)}>
+              <button type="button" className="ledger-modal-close" onClick={() => setPaymentModalOpen(false)} aria-label="Close modal">
                 <X size={18} />
               </button>
             </div>
 
             {selectedDealForPayment && (
-              <div className="modal-deal-banner">
+              <div className="ledger-modal-banner">
                 <strong>{selectedDealForPayment.property.title} ({selectedDealForPayment.dealCode})</strong>
                 <small>Locality: {selectedDealForPayment.property.locality} · Monthly Rent: {formatRupee(selectedDealForPayment.monthlyRent)}</small>
               </div>
             )}
 
-            <form onSubmit={handleRecordPayment} className="modal-form">
-              <div className="form-group-grid">
+            <form onSubmit={handleRecordPayment} className="ledger-modal-form">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Category *</span>
                   <select
@@ -1660,7 +1660,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Payer Full Name *</span>
                   <input
@@ -1686,7 +1686,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Payment Mode *</span>
                   <select
@@ -1733,11 +1733,11 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 />
               </label>
 
-              <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setPaymentModalOpen(false)}>
+              <div className="ledger-modal-actions">
+                <button type="button" className="btn-modal-cancel" onClick={() => setPaymentModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={submittingPayment}>
+                <button type="submit" className="btn-modal-submit" disabled={submittingPayment}>
                   {submittingPayment ? "Recording..." : "Save & Reconcile Payment"}
                 </button>
               </div>
@@ -1750,19 +1750,19 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
           MODAL 2: CREATE NEW RENTAL DEAL
          ───────────────────────────────────────────────────────────── */}
       {newDealModalOpen && (
-        <div className="modal-backdrop" onClick={() => setNewDealModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
-            <div className="modal-header">
+        <div className="ledger-modal-backdrop" onClick={() => setNewDealModalOpen(false)}>
+          <div className="ledger-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+            <div className="ledger-modal-header">
               <div>
                 <h3>Create New Rental Deal</h3>
                 <p>Link flat, owner, and tenant to track deposits, brokerage, and lease duration.</p>
               </div>
-              <button className="modal-close" onClick={() => setNewDealModalOpen(false)}>
+              <button type="button" className="ledger-modal-close" onClick={() => setNewDealModalOpen(false)} aria-label="Close modal">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateDeal} className="modal-form">
+            <form onSubmit={handleCreateDeal} className="ledger-modal-form">
               <label>
                 <span>Select Flat / Property *</span>
                 <select
@@ -1788,7 +1788,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </select>
               </label>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Tenant / Seeker Full Name *</span>
                   <input
@@ -1812,7 +1812,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Agreed Monthly Rent (₹) *</span>
                   <input
@@ -1835,7 +1835,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Total Security Deposit (₹) *</span>
                   <input
@@ -1858,7 +1858,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Owner Brokerage Due (₹) *</span>
                   <input
@@ -1881,7 +1881,7 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </label>
               </div>
 
-              <div className="form-group-grid">
+              <div className="ledger-form-grid">
                 <label>
                   <span>Seeker Fee Due (₹) *</span>
                   <input
@@ -1915,11 +1915,11 @@ export function AdminRentalLedger({ onOpenRequestsQueue, onOpenModerationQueue }
                 </select>
               </label>
 
-              <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setNewDealModalOpen(false)}>
+              <div className="ledger-modal-actions">
+                <button type="button" className="btn-modal-cancel" onClick={() => setNewDealModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={submittingDeal}>
+                <button type="submit" className="btn-modal-submit" disabled={submittingDeal}>
                   {submittingDeal ? "Creating..." : "Create Deal & Update Flat"}
                 </button>
               </div>
