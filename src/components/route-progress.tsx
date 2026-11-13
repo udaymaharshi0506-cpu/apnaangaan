@@ -1,66 +1,74 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 export function RouteProgress() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    // When pathname or searchParams change, finish the loading bar
+    // When pathname changes, complete and dismiss the bar
     if (loading) {
       setProgress(100);
       const timer = setTimeout(() => {
         setLoading(false);
         setProgress(0);
-      }, 350);
+      }, 300);
       return () => clearTimeout(timer);
     }
-  }, [pathname, searchParams]);
+  }, [pathname, loading]);
 
   useEffect(() => {
-    // Intercept internal link clicks to trigger top progress bar immediately
     function handleLinkClick(e: MouseEvent) {
-      const target = (e.target as HTMLElement).closest("a");
-      if (!target) return;
+      try {
+        const rawTarget = e.target;
+        const el = rawTarget instanceof Element ? rawTarget : (rawTarget as Node)?.parentElement;
+        if (!el || typeof el.closest !== "function") return;
 
-      const href = target.getAttribute("href");
-      if (!href) return;
+        const anchor = el.closest("a");
+        if (!anchor) return;
 
-      // Ignore external, hash links, mailto/tel, new tab, or modifier keys
-      if (
-        href.startsWith("http://") ||
-        href.startsWith("https://") ||
-        href.startsWith("#") ||
-        href.startsWith("mailto:") ||
-        href.startsWith("tel:") ||
-        target.target === "_blank" ||
-        e.ctrlKey ||
-        e.metaKey ||
-        e.shiftKey ||
-        e.altKey
-      ) {
-        return;
+        const href = anchor.getAttribute("href");
+        if (!href) return;
+
+        // Skip external, anchors, mailto, tel, target _blank, or modifier clicks
+        if (
+          href.startsWith("http://") ||
+          href.startsWith("https://") ||
+          href.startsWith("#") ||
+          href.startsWith("mailto:") ||
+          href.startsWith("tel:") ||
+          anchor.target === "_blank" ||
+          e.ctrlKey ||
+          e.metaKey ||
+          e.shiftKey ||
+          e.altKey
+        ) {
+          return;
+        }
+
+        const currentPath = window.location.pathname;
+        if (href === currentPath) return;
+
+        setLoading(true);
+        setProgress(30);
+
+        const t1 = setTimeout(() => setProgress(75), 150);
+        // Safety timeout: dismiss if navigation takes too long or is canceled
+        const t2 = setTimeout(() => {
+          setLoading(false);
+          setProgress(0);
+        }, 4000);
+
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+        };
+      } catch {
+        // Silently ignore to never block browser navigation
       }
-
-      // Check if it's the exact same url
-      const currentUrl = window.location.pathname + window.location.search;
-      if (href === currentUrl) return;
-
-      // Start loading bar animation
-      setLoading(true);
-      setProgress(25);
-
-      const p1 = setTimeout(() => setProgress(65), 120);
-      const p2 = setTimeout(() => setProgress(85), 350);
-
-      return () => {
-        clearTimeout(p1);
-        clearTimeout(p2);
-      };
     }
 
     document.addEventListener("click", handleLinkClick, { capture: true });
@@ -89,9 +97,9 @@ export function RouteProgress() {
         style={{
           height: "100%",
           width: `${progress}%`,
-          background: "linear-gradient(90deg, var(--brand) 0%, var(--accent) 50%, var(--brand-deep) 100%)",
+          background: "linear-gradient(90deg, var(--brand, #164f4c) 0%, var(--accent, #e5ac70) 50%, var(--brand-deep, #103f3e) 100%)",
           boxShadow: "0 0 10px rgba(22, 79, 76, 0.6), 0 0 5px rgba(229, 172, 112, 0.8)",
-          transition: progress === 100 ? "width 0.2s ease-out, opacity 0.3s ease-out" : "width 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+          transition: progress === 100 ? "width 0.2s ease-out, opacity 0.3s ease-out" : "width 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
           opacity: progress === 100 ? 0 : 1,
         }}
       />

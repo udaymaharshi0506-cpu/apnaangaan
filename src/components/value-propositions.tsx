@@ -53,6 +53,7 @@ export function FlexibleStayWidget() {
         {durations.map((dur, i) => (
           <button
             key={dur.months}
+            type="button"
             className={`vp-pill ${active === i ? "vp-pill-active" : ""}`}
             onClick={() => setActive(i)}
             style={active === i ? { background: dur.accent, borderColor: dur.accent, color: "#fff" } : {}}
@@ -88,7 +89,7 @@ export function FlexibleStayWidget() {
 
 /* ─────────── 2. Brokerage Comparison Widget ─────────── */
 function AnimatedBar({ value, max, color, animate }: { value: number; max: number; color: string; animate: boolean }) {
-  const pct = (value / max) * 100;
+  const pct = Math.min(100, Math.max(0, (value / max) * 100));
   return (
     <div className="vp-bar-track">
       <div
@@ -96,7 +97,7 @@ function AnimatedBar({ value, max, color, animate }: { value: number; max: numbe
         style={{
           width: animate ? `${pct}%` : "0%",
           background: color,
-          transition: "width 1.1s cubic-bezier(0.22, 1, 0.36, 1)",
+          transition: "width 0.9s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       />
     </div>
@@ -109,17 +110,33 @@ export function BrokerageWidget() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Immediate fallback for mobile
+    const fallback = setTimeout(() => setAnimate(true), 500);
+
     const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) setAnimate(true); }, { threshold: 0.3 });
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setAnimate(true);
+      return () => clearTimeout(fallback);
+    }
+
+    const obs = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) {
+        setAnimate(true);
+        clearTimeout(fallback);
+        obs.disconnect();
+      }
+    }, { threshold: 0.05 });
+
     obs.observe(el);
-    return () => obs.disconnect();
+    return () => {
+      clearTimeout(fallback);
+      obs.disconnect();
+    };
   }, []);
 
   const traditional = rent; // 1 month full brokerage
   const seekerFee = Math.round(rent * 0.5);
   const ownerFee = Math.round(rent * 0.15);
-  const totalApna = seekerFee + ownerFee;
   const saving = traditional - seekerFee;
 
   return (
@@ -130,11 +147,14 @@ export function BrokerageWidget() {
           FAIR BROKERAGE
         </span>
         <h3>Pay less. Get <em>more.</em></h3>
-        <p>See exactly how much you save with Apna Aangan's transparent, shared fee model.</p>
+        <p>See exactly how much you save with Apna Aangan&apos;s transparent, shared fee model.</p>
       </div>
 
       <div className="vp-rent-slider-row">
-        <label className="vp-slider-label">Monthly Rent: <strong>₹{rent.toLocaleString("en-IN")}</strong></label>
+        <div className="vp-slider-label">
+          <span>Monthly Rent:</span>
+          <strong>₹{rent.toLocaleString("en-IN")}</strong>
+        </div>
         <input
           type="range"
           min={5000}
@@ -143,6 +163,7 @@ export function BrokerageWidget() {
           value={rent}
           onChange={(e) => setRent(Number(e.target.value))}
           className="vp-slider"
+          aria-label="Monthly Rent Slider"
         />
         <div className="vp-slider-range"><span>₹5K</span><span>₹80K</span></div>
       </div>
@@ -196,23 +217,29 @@ const spamCalls = [
 ];
 
 export function PrivacyShieldWidget() {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(3); // Default to showing blocked state for instant mobile reliability
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // If IntersectionObserver is available, run a smooth staged simulation
     const el = ref.current;
-    if (!el) return;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+
+    let hasRun = false;
     const obs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) {
+      if (e.isIntersecting && !hasRun) {
+        hasRun = true;
+        setStep(0);
         let i = 0;
         const t = setInterval(() => {
           i++;
           setStep(i);
-          if (i >= spamCalls.length + 1) clearInterval(t);
-        }, 600);
+          if (i >= spamCalls.length) clearInterval(t);
+        }, 500);
         obs.disconnect();
       }
-    }, { threshold: 0.4 });
+    }, { threshold: 0.05 });
+
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
@@ -225,7 +252,7 @@ export function PrivacyShieldWidget() {
           PRIVACY FIRST
         </span>
         <h3>Zero spam calls. <em>Always.</em></h3>
-        <p>Your number is never shared with brokers, agents, or anyone else. We handle the connection — privately.</p>
+        <p>Your number is never shared with brokers or callers. We handle connections privately.</p>
       </div>
 
       <div className="vp-shield-visual">
@@ -238,7 +265,6 @@ export function PrivacyShieldWidget() {
             <div
               key={c.name}
               className={`vp-spam-call ${step > i ? "vp-spam-blocked" : ""}`}
-              style={{ transitionDelay: `${i * 0.1}s` }}
             >
               <div className="vp-spam-avatar">
                 <Phone size={13} />
@@ -256,7 +282,7 @@ export function PrivacyShieldWidget() {
 
         <div className="vp-shield-divider">
           <div className="vp-shield-icon-wrap">
-            <Shield size={28} />
+            <Shield size={24} />
           </div>
           <div className="vp-shield-line" />
         </div>
@@ -274,10 +300,10 @@ export function PrivacyShieldWidget() {
             </div>
             <div className="vp-inquiry-body">
               <strong>Apna Aangan Team</strong>
-              <span>A verified home seeker is interested in your property. No contact exchange needed — we handle it.</span>
+              <span>A verified home seeker is interested in your property. No contact exchange needed.</span>
             </div>
             <div className="vp-inquiry-footer">
-              <CheckCircle2 size={12} /> Identity verified · No spam
+              <CheckCircle2 size={12} /> Identity verified · Zero spam
             </div>
           </div>
           <p className="vp-shield-note">Your number stays private. Forever.</p>
@@ -295,7 +321,7 @@ export function ValuePropositions() {
         <div className="vp-section-head">
           <span className="eyebrow"><span className="eyebrow-line" /> WHY APNA AANGAN</span>
           <h2>Built differently. <em>For you.</em></h2>
-          <p>Three things that set us apart from every other rental platform.</p>
+          <p>Three core promises that set us apart from every other rental platform.</p>
         </div>
         <div className="vp-grid">
           <FlexibleStayWidget />
@@ -306,4 +332,3 @@ export function ValuePropositions() {
     </section>
   );
 }
-

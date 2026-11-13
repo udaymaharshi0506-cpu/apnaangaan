@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 export function ScrollReveal({
   children,
   className = "",
-  threshold = 0.12,
+  threshold = 0.05,
 }: {
   children: ReactNode;
   className?: string;
@@ -15,23 +15,43 @@ export function ScrollReveal({
   const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === "undefined") {
+    // On mobile devices, reveal immediately to prevent any blank screen or lag
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
       setRevealed(true);
       return;
     }
+
+    // Safety fallback: guaranteed reveal within 400ms even if observer is slow
+    const fallbackTimer = setTimeout(() => {
+      setRevealed(true);
+    }, 400);
+
+    const el = ref.current;
+    if (!el) return () => clearTimeout(fallbackTimer);
+
+    if (typeof IntersectionObserver === "undefined") {
+      setRevealed(true);
+      clearTimeout(fallbackTimer);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
           setRevealed(true);
+          clearTimeout(fallbackTimer);
           observer.disconnect();
         }
       },
-      { threshold, rootMargin: "0px 0px -40px 0px" }
+      { threshold, rootMargin: "0px 0px 50px 0px" }
     );
+
     observer.observe(el);
-    return () => observer.disconnect();
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      observer.disconnect();
+    };
   }, [threshold]);
 
   return (
@@ -40,4 +60,3 @@ export function ScrollReveal({
     </div>
   );
 }
-
