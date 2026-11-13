@@ -1058,20 +1058,24 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     await sendNotification(user.id, "listing", `Your ${modeLabel} "${property.title}" was submitted for verification.`, "/owner");
 
     // Real-time notification to all platform administrators
-    const adminUsers = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(sql`'admin' = ANY(roles) OR role = 'admin'`);
-    await Promise.all(
-      adminUsers.map((a) =>
-        sendNotification(
-          a.id,
-          "listing",
-          `🔔 New ${modeLabel} submitted by ${user.name || "Owner"} for "${property.title}".`,
-          "/admin?view=requests"
+    try {
+      const adminUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`roles::jsonb ? 'admin' OR role = 'admin'`);
+      await Promise.all(
+        adminUsers.map((a) =>
+          sendNotification(
+            a.id,
+            "listing",
+            `🔔 New ${modeLabel} submitted by ${user.name || "Owner"} for "${property.title}".`,
+            "/admin?view=requests"
+          )
         )
-      )
-    );
+      );
+    } catch (notifErr) {
+      console.error("Failed to notify admins of new listing:", notifErr);
+    }
 
     // Automatically record in manager_requests queue
     await db
@@ -1332,17 +1336,21 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     );
 
     // 2. Real-time Admin notification to all administrators
-    const adminUsers = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(sql`'admin' = ANY(roles) OR role = 'admin'`);
+    try {
+      const adminUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`roles::jsonb ? 'admin' OR role = 'admin'`);
 
-    const adminMessage = `🔔 New Hire a Manager Request: ${user.name || "Owner"} (${ownerContactPhone || "No phone"}) selected ${tierLabel} for ${propertyTitle || locality || "a rental property"}.`;
-    await Promise.all(
-      adminUsers.map((admin) =>
-        sendNotification(admin.id, "manager_request", adminMessage, `/admin?view=requests&id=${created.id}`)
-      )
-    );
+      const adminMessage = `🔔 New Hire a Manager Request: ${user.name || "Owner"} (${ownerContactPhone || "No phone"}) selected ${tierLabel} for ${propertyTitle || locality || "a rental property"}.`;
+      await Promise.all(
+        adminUsers.map((admin) =>
+          sendNotification(admin.id, "manager_request", adminMessage, `/admin?view=requests&id=${created.id}`)
+        )
+      );
+    } catch (notifErr) {
+      console.error("Failed to notify admins of manager request:", notifErr);
+    }
 
     return respond(
       {
