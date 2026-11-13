@@ -1405,7 +1405,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       sendNotification(
         property.ownerId,
         "interest",
-        `New tenant interest on "${property.title}": ${occupantsCount || "1"} ${tenantType || "Family"} (${profession || "Professional"}).`,
+        `${seekerDisplayName} is interested in "${property.title}" · ${occupantsCount || "1"} ${tenantType || "Family"} (${profession || "Professional"}).`,
         "/owner"
       ),
       sendNotification(
