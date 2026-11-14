@@ -7,7 +7,7 @@ import { ACTIVE_MEETING_STATUSES, canTransitionMeetingStatus, formatMeetingStatu
 import { serializeAdminLead, serializeAdminProperty, serializeCustomerLead, serializeOwnerInquiry, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
 import { detectContactInfo, findFirstContactViolation } from "@/lib/contact-filter";
 import { normalizeWhitespace, parseIndianPhone, parseIndianPinCode } from "@/lib/input-validation";
-import { filterLocationSuggestions } from "@/lib/search-utils";
+import { expandLocationSearchVariants, filterLocationSuggestions } from "@/lib/search-utils";
 import { validateImageUploadBytes } from "@/lib/image-validation";
 import {
   BHK_OPTIONS_BY_VERTICAL,
@@ -839,19 +839,101 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     }
 
     try {
-      const rows = await db
-        .selectDistinct({ locality: properties.locality, city: properties.city })
+      // Strict Live-Only Rule: Return only active, available properties
+      // (status IN ('live', 'available_pending') AND status != 'rejected' AND rental_status != 'rented')
+      const liveCondition = and(
+        eq(properties.category, "rent_home"),
+        or(eq(properties.status, "live"), sql`${properties.status}::text = 'available_pending'`),
+        ne(properties.status, "rejected"),
+        ne(properties.rentalStatus, "rented")
+      );
+
+      // 1. Live cities with count
+      const cityCounts = await db
+        .select({ city: properties.city, count: count() })
         .from(properties)
-        .where(eq(properties.status, "live"));
-      const combined = new Set<string>();
-      for (const row of rows) {
-        if (row.locality && row.city) combined.add(`${row.locality}, ${row.city}`);
-        if (row.city) combined.add(row.city);
+        .where(liveCondition)
+        .groupBy(properties.city)
+        .orderBy(desc(count()));
+
+      // 2. Live localities with count
+      const localityCounts = await db
+        .select({ locality: properties.locality, city: properties.city, count: count() })
+        .from(properties)
+        .where(liveCondition)
+        .groupBy(properties.locality, properties.city)
+        .orderBy(desc(count()));
+
+      // 3. Live pin codes with count
+      const pinCounts = await db
+        .select({ pinCode: properties.pinCode, locality: properties.locality, city: properties.city, count: count() })
+        .from(properties)
+        .where(and(liveCondition, sql`${properties.pinCode} IS NOT NULL AND trim(${properties.pinCode}) != ''`))
+        .groupBy(properties.pinCode, properties.locality, properties.city)
+        .orderBy(desc(count()));
+
+      const availableCities = cityCounts
+        .filter((c) => c.city && c.city.trim().length > 0)
+        .map((c) => ({ name: c.city.trim(), count: Number(c.count) }));
+
+      type LocationItem = { name: string; count: number; type: "city" | "locality" | "pin"; raw?: string };
+      const itemsMap = new Map<string, LocationItem>();
+
+      for (const c of availableCities) {
+        itemsMap.set(c.name.toLowerCase(), { name: c.name, count: c.count, type: "city" });
       }
-      return respond({ suggestions: filterLocationSuggestions(q, Array.from(combined), fallbackCities, 8) });
+
+      for (const loc of localityCounts) {
+        if (!loc.locality || !loc.locality.trim()) continue;
+        const fullName = `${loc.locality.trim()}, ${loc.city.trim()}`;
+        itemsMap.set(fullName.toLowerCase(), {
+          name: fullName,
+          count: Number(loc.count),
+          type: "locality",
+          raw: loc.locality.trim(),
+        });
+      }
+
+      for (const p of pinCounts) {
+        if (!p.pinCode || !p.pinCode.trim()) continue;
+        const label = `${p.pinCode.trim()} (${p.locality ? `${p.locality.trim()}, ` : ""}${p.city.trim()})`;
+        itemsMap.set(p.pinCode.trim().toLowerCase(), {
+          name: label,
+          count: Number(p.count),
+          type: "pin",
+          raw: p.pinCode.trim(),
+        });
+      }
+
+      let allItems = Array.from(itemsMap.values());
+
+      if (q) {
+        const qTerms = expandLocationSearchVariants(q);
+        allItems = allItems.filter((item) => {
+          const itemLower = item.name.toLowerCase();
+          const rawLower = (item.raw || "").toLowerCase();
+          return qTerms.some((t) => itemLower.includes(t) || rawLower.includes(t));
+        });
+      }
+
+      // Sort by property count descending
+      allItems.sort((a, b) => b.count - a.count);
+
+      const suggestions = allItems.slice(0, 10).map((it) => it.name);
+
+      return respond({
+        suggestions: suggestions.length > 0 ? suggestions : filterLocationSuggestions(q, [], fallbackCities, 8),
+        items: allItems.slice(0, 10),
+        availableCities: availableCities.length > 0 ? availableCities : fallbackCities.slice(0, 6).map((name) => ({ name, count: 0 })),
+      });
     } catch (err) {
       console.warn("Locations lookup fallback due to DB connection:", err);
-      return respond({ suggestions: filterLocationSuggestions(q, [], fallbackCities, 8) });
+      const fallbackItems: Array<{ name: string; count: number; type: "city" | "locality" | "pin" }> = fallbackCities.slice(0, 6).map((name) => ({ name, count: 0, type: "city" }));
+      return respond({
+        suggestions: filterLocationSuggestions(q, [], fallbackCities, 8),
+        items: fallbackItems,
+        availableCities: fallbackItems.map((f) => ({ name: f.name, count: 0 })),
+      });
     }
   }
 
@@ -951,7 +1033,25 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       }
     }
 
-    return respond(await findProperties({ category: "rent_home", city: params.get("city") || undefined, q: params.get("q") || undefined, propertyType: params.get("propertyType") || undefined, minPrice: safeNumber(params.get("minPrice")), maxPrice: safeNumber(params.get("maxPrice")), minArea: safeNumber(params.get("minArea")), maxArea: safeNumber(params.get("maxArea")), bhk: params.get("bhk") || undefined, furnishing: params.get("furnishing") || undefined, verified: params.get("verified") === "true", sort: params.get("sort") || undefined, page: pageFrom(request), limit: safeNumber(params.get("limit")) }));
+    return respond(
+      await findProperties({
+        category: "rent_home",
+        city: params.get("city") || undefined,
+        location: params.get("location") || undefined,
+        q: params.get("q") || undefined,
+        propertyType: params.get("propertyType") || undefined,
+        minPrice: safeNumber(params.get("minPrice")),
+        maxPrice: safeNumber(params.get("maxPrice")),
+        minArea: safeNumber(params.get("minArea")),
+        maxArea: safeNumber(params.get("maxArea")),
+        bhk: params.get("bhk") || undefined,
+        furnishing: params.get("furnishing") || undefined,
+        verified: params.get("verified") === "true",
+        sort: params.get("sort") || undefined,
+        page: pageFrom(request),
+        limit: safeNumber(params.get("limit")),
+      })
+    );
   }
   if (segments[0] === "properties" && segments.length === 2 && method === "GET") {
     const property = await getProperty(validId(segments[1]));

@@ -23,8 +23,24 @@ export default async function SectionPage({ params, searchParams }: Props) {
   for (const [key, value] of Object.entries(raw)) if (typeof value === "string") filters[key] = value;
   switch (section) {
     case "search": {
-      const result = await findProperties({ category: "rent_home", q: filters.q, city: filters.city, propertyType: filters.propertyType, minPrice: filters.minPrice ? Number(filters.minPrice) : undefined, maxPrice: filters.maxPrice ? Number(filters.maxPrice) : undefined, minArea: filters.minArea ? Number(filters.minArea) : undefined, maxArea: filters.maxArea ? Number(filters.maxArea) : undefined, bhk: filters.bhk, furnishing: filters.furnishing, verified: filters.verified === "true", sort: filters.sort, page: filters.page ? Number(filters.page) : 1, limit: 12 });
-      return <SearchExperience result={result} initialFilters={filters}/>;
+      const result = await findProperties({
+        category: "rent_home",
+        q: filters.q,
+        city: filters.city,
+        location: filters.location,
+        propertyType: filters.propertyType,
+        minPrice: filters.minPrice ? Number(filters.minPrice) : undefined,
+        maxPrice: filters.maxPrice ? Number(filters.maxPrice) : undefined,
+        minArea: filters.minArea ? Number(filters.minArea) : undefined,
+        maxArea: filters.maxArea ? Number(filters.maxArea) : undefined,
+        bhk: filters.bhk,
+        furnishing: filters.furnishing,
+        verified: filters.verified === "true",
+        sort: filters.sort,
+        page: filters.page ? Number(filters.page) : 1,
+        limit: 12,
+      });
+      return <SearchExperience result={result} initialFilters={filters} />;
     }
     case "login": return <LoginExperience next={filters.next}/>;
     case "signup": return <SignupExperience next={filters.next}/>;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, ChevronDown, LayoutGrid, ListFilter, Map, MapPin, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Building2, ChevronDown, LayoutGrid, ListFilter, Map, MapPin, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { LocationSuggest } from "@/components/search-controls";
@@ -32,7 +32,7 @@ export function PropertyCardSkeletonGrid({ count = 6 }: { count?: number }) {
   );
 }
 
-type Result = { items: PublicProperty[]; total: number; page: number; pages: number; limit: number };
+type Result = { items: PublicProperty[]; total: number; page: number; pages: number; limit: number; availableCities?: Array<{ name: string; count: number }> };
 const rentalTypes = [
   { label: "All rentals", value: "" },
   { label: "Apartments", value: "Apartment" },
@@ -48,7 +48,11 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
   const router = useRouter();
   const { user, toast } = useApp();
   const [isPending, startTransition] = useTransition();
-  const [query, setQuery] = useState(initialFilters.q || initialFilters.city || "");
+  const searchedLocation = initialFilters.location || initialFilters.city || initialFilters.q || "";
+  const [query, setQuery] = useState(searchedLocation);
+  const [liveCities, setLiveCities] = useState<Array<{ name: string; count: number }>>(
+    result.availableCities || []
+  );
   const [draft, setDraft] = useState<Record<string, string>>(initialFilters);
   const [mapView, setMapView] = useState(initialFilters.view === "map");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -57,10 +61,23 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
 
   useEffect(() => {
     setDraft(initialFilters);
-    setQuery(initialFilters.q || initialFilters.city || "");
+    setQuery(initialFilters.location || initialFilters.city || initialFilters.q || "");
     setMapView(initialFilters.view === "map");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersSignature]);
+
+  useEffect(() => {
+    if (!liveCities.length) {
+      fetch("/api/locations")
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data.availableCities) && data.availableCities.length > 0) {
+            setLiveCities(data.availableCities);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [liveCities.length]);
 
   const category = initialFilters.category || "";
 
@@ -72,7 +89,15 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
       router.push(`/search${next.toString() ? `?${next}` : ""}`);
     });
   }
-  function submitSearch(event: FormEvent) { event.preventDefault(); navigate({ q: query.split(",")[0].trim() || undefined, city: undefined }); }
+  function submitSearch(event?: FormEvent) {
+    if (event) event.preventDefault();
+    const clean = query.trim();
+    navigate({ location: clean || undefined, city: undefined, q: undefined });
+  }
+  function resetLocationFilter() {
+    setQuery("");
+    navigate({ location: undefined, city: undefined, q: undefined });
+  }
   function applyFilters() {
     const values: Record<string, string | undefined> = {};
     for (const key of ["minPrice", "maxPrice", "bhk", "furnishing", "minArea", "maxArea", "verified"]) values[key] = draft[key] || undefined;
@@ -96,7 +121,7 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
     finally { setSaving(false); }
   }
   const activeFilters = ["minPrice", "maxPrice", "bhk", "furnishing", "minArea", "maxArea", "verified"].filter((key) => !!initialFilters[key]).length;
-  const hasAnyActiveFilter = Boolean(initialFilters.q || initialFilters.city || initialFilters.propertyType || initialFilters.sort || activeFilters > 0);
+  const hasAnyActiveFilter = Boolean(initialFilters.location || initialFilters.city || initialFilters.q || initialFilters.propertyType || initialFilters.sort || activeFilters > 0);
   const first = result.items[0];
   const lat = first?.latitude || 26.9124, lon = first?.longitude || 75.7873;
   const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - .035}%2C${lat - .025}%2C${lon + .035}%2C${lat + .025}&layer=mapnik&marker=${lat}%2C${lon}`;
@@ -113,10 +138,10 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
   return <main className="search-page"><div className="container search-page-inner">
     <div className="breadcrumbs"><Link href="/">Home</Link><span>/</span><span>Rental homes</span></div>
     <div className="search-page-top"><div><span className="eyebrow"><span className="eyebrow-line"/> FIND YOUR RENTAL</span><h1>Explore rental homes <em>made for you.</em></h1><p>Every great next chapter begins somewhere.</p></div><div className="search-top-ornament"><Sparkles size={26}/></div></div>
-    <div className="search-main-bar"><form onSubmit={submitSearch}><LocationSuggest value={query} onChange={setQuery} placeholder="Search Jaipur locality (e.g. Mansarovar, Vaishali Nagar) or city"/><button className="btn btn-primary" type="submit"><Search size={18}/> Search</button></form><button className="search-save-button" onClick={() => void saveSearch()} disabled={saving}><Sparkles size={16}/>{saving ? "Saving..." : "Save this search"}</button></div>
+    <div className="search-main-bar"><form onSubmit={submitSearch}><LocationSuggest value={query} onChange={setQuery} onSubmit={(val) => { const clean = val.trim(); navigate({ location: clean || undefined, city: undefined, q: undefined }); }} placeholder="Search city, locality, or pin code..."/><button className="btn btn-primary" type="submit"><Search size={18}/> Search</button></form><button className="search-save-button" onClick={() => void saveSearch()} disabled={saving}><Sparkles size={16}/>{saving ? "Saving..." : "Save this search"}</button></div>
     <div className="search-category-scroll">{rentalTypes.map((item) => <button key={item.value} className={(initialFilters.propertyType === item.value || (!initialFilters.propertyType && !item.value)) ? "active" : ""} onClick={() => navigate({ propertyType: item.value || undefined })}>{item.label}</button>)}</div>
     <div className="search-body"><aside className="desktop-filters">{filters}</aside><div className="search-results">
-      <div className="results-toolbar"><div><strong>{result.total} {result.total === 1 ? "home" : "homes"} for rent</strong><span>Rental homes{initialFilters.q ? ` · ${initialFilters.q}` : initialFilters.city ? ` · ${initialFilters.city}` : ""}{initialFilters.propertyType ? ` · ${initialFilters.propertyType}` : ""}</span></div><div className="toolbar-actions"><button className="mobile-filter-button" onClick={() => setFilterOpen(true)}><SlidersHorizontal size={17}/> Filters {activeFilters > 0 && <b>{activeFilters}</b>}</button><label className="sort-select">Sort by <select value={initialFilters.sort || "relevance"} onChange={(e) => navigate({ sort: e.target.value === "relevance" ? undefined : e.target.value })}><option value="relevance">Recommended</option><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select><ChevronDown size={14}/></label><div className="view-toggle"><button className={!mapView ? "active" : ""} onClick={() => { setMapView(false); navigate({ view: undefined }); }} aria-label="List view"><LayoutGrid size={17}/></button><button className={mapView ? "active" : ""} onClick={() => { setMapView(true); navigate({ view: "map" }); }} aria-label="Map view"><Map size={17}/></button></div></div></div>
+      <div className="results-toolbar"><div><strong>{result.total} {result.total === 1 ? "home" : "homes"} for rent</strong><span>Rental homes{searchedLocation ? ` · ${searchedLocation}` : ""}{initialFilters.propertyType ? ` · ${initialFilters.propertyType}` : ""}</span></div><div className="toolbar-actions"><button className="mobile-filter-button" onClick={() => setFilterOpen(true)}><SlidersHorizontal size={17}/> Filters {activeFilters > 0 && <b>{activeFilters}</b>}</button><label className="sort-select">Sort by <select value={initialFilters.sort || "relevance"} onChange={(e) => navigate({ sort: e.target.value === "relevance" ? undefined : e.target.value })}><option value="relevance">Recommended</option><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select><ChevronDown size={14}/></label><div className="view-toggle"><button className={!mapView ? "active" : ""} onClick={() => { setMapView(false); navigate({ view: undefined }); }} aria-label="List view"><LayoutGrid size={17}/></button><button className={mapView ? "active" : ""} onClick={() => { setMapView(true); navigate({ view: "map" }); }} aria-label="Map view"><Map size={17}/></button></div></div></div>
       {isPending ? (
         <PropertyCardSkeletonGrid count={result.items.length || 6} />
       ) : result.items.length ? (
@@ -129,11 +154,42 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
           <div className="search-grid">{result.items.map((property) => <PropertyCard key={property.id} property={property}/>)}</div>
         )
       ) : (
-        <div className="empty-results">
-          <div><ListFilter size={35}/></div>
-          <h3>No properties found</h3>
-          <p>{hasAnyActiveFilter ? "No properties match your active search or filter criteria. Reset filters to view all available rental homes." : "Try searching a Jaipur locality like Mansarovar, Vaishali Nagar, or Malviya Nagar."}</p>
-          <button className="btn btn-primary" onClick={resetAllFilters}>Reset Filters <ArrowRight size={16}/></button>
+        <div className="empty-results empty-location-state">
+          <div className="empty-results-icon-wrap"><Building2 size={36} strokeWidth={1.8}/></div>
+          <h3>{searchedLocation ? `No properties available in ${searchedLocation}` : "No properties found"}</h3>
+          <p>{searchedLocation ? "We currently don't have any live rental flats listed in this location. Try another area or explore available cities below." : hasAnyActiveFilter ? "No properties match your active search or filter criteria. Reset filters to view all available rental homes." : "We currently don't have any live rental flats listed here. Explore available cities below."}</p>
+          <div className="empty-results-actions">
+            <button type="button" className="btn btn-primary empty-view-all-btn" onClick={resetLocationFilter}>
+              <Building2 size={16}/> View All Available Flats <ArrowRight size={16}/>
+            </button>
+            {hasAnyActiveFilter && (
+              <button type="button" className="btn btn-secondary empty-reset-btn" onClick={resetAllFilters}>
+                Reset all filters
+              </button>
+            )}
+          </div>
+          {liveCities.length > 0 && (
+            <div className="empty-available-cities">
+              <span className="empty-cities-heading">CITIES WITH LIVE HOMES</span>
+              <div className="empty-cities-pills">
+                {liveCities.map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    className="empty-city-pill"
+                    onClick={() => {
+                      setQuery(c.name);
+                      navigate({ location: c.name, city: undefined, q: undefined });
+                    }}
+                  >
+                    <MapPin size={13}/>
+                    <span>{c.name}</span>
+                    {c.count > 0 && <span className="pill-count">{c.count}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {result.pages > 1 && <div className="pagination"><button disabled={result.page <= 1} onClick={() => navigate({ page: String(result.page - 1) })}><ArrowLeft size={16}/> Previous</button><span>Page {result.page} of {result.pages}</span><button disabled={result.page >= result.pages} onClick={() => navigate({ page: String(result.page + 1) })}>Next <ArrowRight size={16}/></button></div>}

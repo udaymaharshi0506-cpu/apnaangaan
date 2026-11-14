@@ -31,7 +31,7 @@ export function formatPrice(
   category = "rent_home",
   options: PriceFormatOptions = {}
 ): string {
-  const isTotal = options.period === "total";
+  const isTotal = options.period === "total" || category === "buy_home";
   if (!Number.isFinite(price) || price <= 0) {
     return isTotal ? "₹0" : "₹0/month";
   }

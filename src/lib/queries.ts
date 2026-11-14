@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { properties } from "@/db/schema";
 import { expandLocationSearchVariants } from "@/lib/search-utils";
 import { serializePublicProperty, type PublicPropertyInput } from "@/lib/serializers";
-import { and, asc, count, desc, eq, gte, ilike, lte, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, lte, ne, or, sql, type SQL } from "drizzle-orm";
 
 /** Explicit DB column allowlist for public, customer, and non-sensitive property reads.
  *  Projects out ownerId, address, ownerName, ownerPhone, liveSelfieUrl, aadhaarCardUrl, coOwners, and rejectionReason at the query layer. */
@@ -61,6 +61,7 @@ export const ownerPropertyColumns = {
 export type PropertyFilters = {
   category?: string;
   city?: string;
+  location?: string;
   q?: string;
   propertyType?: string;
   minPrice?: number;
@@ -79,32 +80,56 @@ export { categoryLabel, formatIndianCurrency, formatPrice } from "@/lib/format";
 
 export async function findProperties(filters: PropertyFilters = {}) {
   try {
-    const conditions: SQL[] = [eq(properties.status, "live"), eq(properties.category, "rent_home")];
-    if (filters.city && filters.city.toLowerCase() !== "all cities") {
-      const cityTerms = expandLocationSearchVariants(filters.city);
-      if (cityTerms.length > 0) {
-        conditions.push(
-          or(...cityTerms.flatMap((term) => [ilike(properties.city, `%${term}%`), ilike(properties.locality, `%${term}%`)]))!
-        );
-      }
-    }
-    if (filters.q) {
-      const qTerms = expandLocationSearchVariants(filters.q);
-      if (qTerms.length > 0) {
+    // Strict Live-Only Rule: Return only active, available properties
+    // (status IN ('live', 'available_pending') AND status != 'rejected' AND rental_status != 'rented')
+    const conditions: SQL[] = [
+      eq(properties.category, "rent_home"),
+      or(eq(properties.status, "live"), sql`${properties.status}::text = 'available_pending'`)!,
+      ne(properties.status, "rejected"),
+      ne(properties.rentalStatus, "rented"),
+    ];
+
+    const locQuery = (filters.location || filters.city || "").trim();
+    if (locQuery && locQuery.toLowerCase() !== "all cities") {
+      const locTerms = expandLocationSearchVariants(locQuery);
+      if (locTerms.length > 0) {
         conditions.push(
           or(
-            ...qTerms.flatMap((term) => [
-              ilike(properties.title, `%${term}%`),
+            ...locTerms.flatMap((term) => [
               ilike(properties.city, `%${term}%`),
               ilike(properties.locality, `%${term}%`),
+              ilike(properties.address, `%${term}%`),
               ilike(properties.landmark, `%${term}%`),
-              ilike(properties.propertyType, `%${term}%`),
-              ilike(properties.bhkOrRoomType, `%${term}%`),
+              ilike(properties.pinCode, `%${term}%`),
             ])
           )!
         );
       }
     }
+
+    if (filters.q) {
+      const qClean = filters.q.trim();
+      if (!locQuery || qClean.toLowerCase() !== locQuery.toLowerCase()) {
+        const qTerms = expandLocationSearchVariants(qClean);
+        if (qTerms.length > 0) {
+          conditions.push(
+            or(
+              ...qTerms.flatMap((term) => [
+                ilike(properties.title, `%${term}%`),
+                ilike(properties.city, `%${term}%`),
+                ilike(properties.locality, `%${term}%`),
+                ilike(properties.address, `%${term}%`),
+                ilike(properties.landmark, `%${term}%`),
+                ilike(properties.pinCode, `%${term}%`),
+                ilike(properties.propertyType, `%${term}%`),
+                ilike(properties.bhkOrRoomType, `%${term}%`),
+              ])
+            )!
+          );
+        }
+      }
+    }
+
     if (filters.propertyType) conditions.push(ilike(properties.propertyType, `%${filters.propertyType}%`));
     if (filters.minPrice !== undefined) conditions.push(gte(properties.price, filters.minPrice));
     if (filters.maxPrice !== undefined) conditions.push(lte(properties.price, filters.maxPrice));
@@ -117,14 +142,49 @@ export async function findProperties(filters: PropertyFilters = {}) {
     const limit = Math.min(Math.max(filters.limit || 12, 1), 30);
     const page = Math.max(filters.page || 1, 1);
     const sorting = filters.sort === "price_asc" ? [asc(properties.price)] : filters.sort === "price_desc" ? [desc(properties.price)] : filters.sort === "newest" ? [desc(properties.createdAt)] : [desc(properties.verified), asc(properties.price)];
-    const [items, [{ total }]] = await Promise.all([
+
+    const liveCondition = and(
+      eq(properties.category, "rent_home"),
+      or(eq(properties.status, "live"), sql`${properties.status}::text = 'available_pending'`),
+      ne(properties.status, "rejected"),
+      ne(properties.rentalStatus, "rented")
+    );
+
+    const [items, [{ total }], cityCounts] = await Promise.all([
       db.select(publicPropertyColumns).from(properties).where(where).orderBy(...sorting).limit(limit).offset((page - 1) * limit),
       db.select({ total: count() }).from(properties).where(where),
+      db.select({ city: properties.city, count: count() }).from(properties).where(liveCondition).groupBy(properties.city).orderBy(desc(count())),
     ]);
-    return { items: items.map(serializePublicProperty), total, page, pages: Math.ceil(total / limit), limit };
+
+    const availableCities = cityCounts
+      .filter((c) => c.city && c.city.trim().length > 0)
+      .map((c) => ({ name: c.city.trim(), count: Number(c.count) }));
+
+    return {
+      items: items.map(serializePublicProperty),
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      limit,
+      availableCities,
+    };
   } catch (error) {
     console.error("Database query failed in findProperties:", error);
-    return { items: [], total: 0, page: 1, pages: 1, limit: filters.limit || 12 };
+    return {
+      items: [],
+      total: 0,
+      page: 1,
+      pages: 1,
+      limit: filters.limit || 12,
+      availableCities: [
+        { name: "Jaipur", count: 0 },
+        { name: "Bengaluru", count: 0 },
+        { name: "Mumbai", count: 0 },
+        { name: "Gurugram", count: 0 },
+        { name: "Pune", count: 0 },
+        { name: "Hyderabad", count: 0 },
+      ],
+    };
   }
 }
 

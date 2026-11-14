@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles, ArrowUp } from "lucide-react";
+import { Bell, Heart, Home, MapPin, Moon, Plus, Search, Sun, UserRound, ClipboardList, ArrowUpRight, ShieldCheck, ChevronDown, Check, CalendarDays, ArrowRight, Sparkles, ArrowUp, Building2, X } from "lucide-react";
 import { useEffect, useState, useRef, Suspense, type ReactNode } from "react";
 import { useApp } from "@/components/providers";
 import { RouteProgress } from "@/components/route-progress";
@@ -34,16 +34,245 @@ const navLinks = [
   { label: "How It Works", href: "/privacy" },
 ];
 
+function HeaderLocationPicker({ pathname }: { pathname: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedLabel, setSelectedLabel] = useState("Bengaluru");
+  const [items, setItems] = useState<Array<{ name: string; count: number; type: string }>>([]);
+  const [availableCities, setAvailableCities] = useState<Array<{ name: string; count: number }>>([
+    { name: "Jaipur", count: 12 },
+    { name: "Bengaluru", count: 4 },
+    { name: "Mumbai", count: 2 },
+    { name: "Gurugram", count: 1 },
+    { name: "Pune", count: 1 },
+    { name: "Hyderabad", count: 1 },
+  ]);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const loc = sp.get("location") || sp.get("city") || sp.get("q");
+      if (loc) setSelectedLabel(loc);
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/locations?q=${encodeURIComponent(query)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        if (Array.isArray(data.items)) setItems(data.items);
+        if (Array.isArray(data.availableCities) && data.availableCities.length > 0) {
+          setAvailableCities(data.availableCities);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [query, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => searchInputRef.current?.focus(), 60);
+    }
+  }, [open]);
+
+  function handleSelect(loc: string) {
+    const trimmed = loc.trim();
+    if (trimmed) {
+      setSelectedLabel(trimmed);
+      setOpen(false);
+      router.push(`/search?location=${encodeURIComponent(trimmed)}`);
+    } else {
+      setSelectedLabel("All Cities");
+      setOpen(false);
+      router.push("/search");
+    }
+  }
+
+  return (
+    <div className="header-location-wrap" ref={popoverRef}>
+      <button
+        type="button"
+        className={`header-location ${open ? "active" : ""}`}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label="Choose location"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <MapPin size={16} />
+        <span className="header-location-label">{selectedLabel}</span>
+        <ChevronDown size={14} className={open ? "rotate-180" : ""} />
+      </button>
+
+      {open && (
+        <div className="city-popover" role="dialog" aria-label="Search rental location">
+          <div className="city-popover-search">
+            <Search size={15} className="city-popover-search-icon" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSelect(query);
+                }
+              }}
+              placeholder="Search city, locality, or pin code..."
+              className="city-popover-input"
+              autoComplete="off"
+              aria-label="Search city, locality, or pin code"
+            />
+            {query && (
+              <button
+                type="button"
+                className="city-popover-clear"
+                onClick={() => setQuery("")}
+                aria-label="Clear location input"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <div className="city-popover-scroll">
+            {query.trim().length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className="city-popover-action city-popover-custom"
+                  onClick={() => handleSelect(query)}
+                >
+                  <Search size={14} />
+                  <span>
+                    Search in <strong>&ldquo;{query.trim()}&rdquo;</strong>
+                  </span>
+                  <ArrowRight size={13} className="ml-auto" />
+                </button>
+
+                {items.length > 0 ? (
+                  <div className="city-popover-section">
+                    <span className="popover-label">MATCHING LOCATIONS</span>
+                    <div className="city-popover-list">
+                      {items.map((item) => (
+                        <button
+                          key={item.name}
+                          type="button"
+                          className="city-popover-item"
+                          onClick={() => handleSelect(item.name)}
+                        >
+                          <span className="city-popover-item-icon">
+                            {item.type === "city" ? <Building2 size={14} /> : <MapPin size={14} />}
+                          </span>
+                          <span className="city-popover-item-name">{item.name}</span>
+                          {item.count > 0 && (
+                            <span className="city-popover-item-badge">
+                              {item.count} {item.count === 1 ? "flat" : "flats"}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="city-popover-empty">
+                    No active listings matching &ldquo;{query.trim()}&rdquo;. Press Enter or click above to search.
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="city-popover-action city-popover-all"
+                  onClick={() => handleSelect("")}
+                >
+                  <Building2 size={14} />
+                  <span>All Available Flats</span>
+                  <ArrowRight size={13} className="ml-auto" />
+                </button>
+
+                <div className="city-popover-section">
+                  <span className="popover-label">CITIES WITH LIVE HOMES</span>
+                  <div className="city-popover-list">
+                    {availableCities.map((c) => (
+                      <button
+                        key={c.name}
+                        type="button"
+                        className="city-popover-item"
+                        onClick={() => handleSelect(c.name)}
+                      >
+                        <span className="city-popover-item-icon">
+                          <MapPin size={14} />
+                        </span>
+                        <span className="city-popover-item-name">{c.name}</span>
+                        {c.count > 0 && (
+                          <span className="city-popover-item-badge">
+                            {c.count} {c.count === 1 ? "flat" : "flats"}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="city-popover-section">
+                  <span className="popover-label">POPULAR CITIES</span>
+                  <div className="city-popover-chips">
+                    {["Jaipur", "Bengaluru", "Mumbai", "Gurugram", "Pune", "Hyderabad"].map((pop) => (
+                      <button
+                        key={pop}
+                        type="button"
+                        className="city-popover-chip"
+                        onClick={() => handleSelect(pop)}
+                      >
+                        {pop}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, theme, toggleTheme, unreadCount, recentNotifications, markAllNotificationsRead, markNotificationRead } = useApp();
-  const [locationOpen, setLocationOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
-  const [city, setCity] = useState("Bengaluru");
   const isAdmin = pathname.startsWith("/admin");
   const isPropertyDetail = pathname.startsWith("/property/");
   const isPostProperty = pathname.startsWith("/post-property");
@@ -144,10 +373,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="header-actions">
-          <div className="header-location-wrap">
-            <button className="header-location" onClick={() => setLocationOpen(!locationOpen)} aria-label="Choose city"><MapPin size={16}/><span>{city}</span><ChevronDown size={14}/></button>
-            {locationOpen && <div className="city-popover"><span className="popover-label">EXPLORE IN</span>{["Bengaluru", "Mumbai", "Pune", "Hyderabad", "Gurugram"].map((option) => <button key={option} onClick={() => { setCity(option); setLocationOpen(false); router.push(`/search?city=${encodeURIComponent(option)}`); }}><MapPin size={15}/>{option}</button>)}</div>}
-          </div>
+          <HeaderLocationPicker pathname={pathname} />
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}>{theme === "light" ? <Moon size={19} strokeWidth={1.8}/> : <Sun size={19} strokeWidth={1.8}/>}</button>
           {isUserCustomer && <Link href="/saved" className="icon-button header-icon-link" aria-label="Saved homes" title="Saved homes"><Heart size={19} strokeWidth={1.8}/></Link>}
           {user && (
