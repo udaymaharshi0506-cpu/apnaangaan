@@ -3231,8 +3231,8 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const monthlyRent = Number(json.monthlyRent || prop.price || 0);
       const stayDurationMonths = Number(json.stayDurationMonths || 11);
       const securityDepositTotal = Number(json.securityDepositTotal || monthlyRent * 2).toFixed(2);
-      const ownerFeeTotal = Number(json.ownerFeeTotal || monthlyRent * 0.5).toFixed(2);
-      const seekerFeeTotal = Number(json.seekerFeeTotal || monthlyRent * 0.5).toFixed(2);
+      const ownerFeeTotal = Number(json.ownerFeeTotal || monthlyRent * 0.15).toFixed(2);
+      const seekerFeeTotal = Number(json.seekerFeeTotal || monthlyRent * 0.15).toFixed(2);
 
       const dealCode = `DEAL-AA-${Date.now().toString().slice(-4)}`;
       const [deal] = await db

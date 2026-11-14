@@ -134,12 +134,12 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
 
   // Strict calculations
   const traditional = rent; // Traditional brokers demand 1 full month's rent (100%)
-  const seekerFee = useMemo(() => Math.round(rent * 0.50), [rent]); // 50% for Home Seeker
+  const seekerFee = useMemo(() => Math.round(rent * 0.15), [rent]); // 15% for Home Seeker
   const ownerFee = useMemo(() => Math.round(rent * 0.15), [rent]); // 15% for Property Owner
 
   const activeFee = role === "seeker" ? seekerFee : ownerFee;
   const activeSaving = traditional - activeFee;
-  const activePctSaved = role === "seeker" ? "50%" : "85%";
+  const activePctSaved = "85%";
 
   return (
     <div className="vp-widget" ref={ref}>
@@ -149,7 +149,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
           FAIR &amp; TRANSPARENT BROKERAGE
         </span>
         <h3>Pay less. Get <em>more.</em></h3>
-        <p>Transparent fee model: 50% from Home Seeker · 15% from Property Owner. Zero hidden charges.</p>
+        <p>Transparent fee model: 15% from Home Seeker · 15% from Property Owner. Zero hidden charges.</p>
       </div>
 
       {/* Role Switcher Pill */}
@@ -163,7 +163,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
         >
           <UserCheck size={14} />
           <span>Home Seeker</span>
-          <span className="vp-role-pct">50% fee</span>
+          <span className="vp-role-pct">15% fee</span>
         </button>
         <button
           type="button"
@@ -236,19 +236,19 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
         <div className="vp-compare-col vp-compare-good">
           <div className="vp-compare-label">
             <BadgeCheck size={14} />
-            Apna Aangan ({role === "seeker" ? "Seeker 50%" : "Owner 15%"})
+            Apna Aangan ({role === "seeker" ? "Seeker 15%" : "Owner 15%"})
           </div>
           <div className="vp-compare-amount" style={{ color: "var(--brand-deep)" }}>
             ₹{activeFee.toLocaleString("en-IN")}
           </div>
           <div className="vp-compare-sub">
-            {role === "seeker" ? "50% brokerage (zero advance cuts)" : "Only 15% nominal fee on lease closure"}
+            {role === "seeker" ? "15% brokerage (zero advance cuts)" : "Only 15% nominal fee on lease closure"}
           </div>
           <AnimatedBar value={activeFee} max={traditional} color="var(--brand)" animate={animate} />
           <div className="vp-compare-breakdown">
             <span style={{ color: "var(--brand)" }}>
               {role === "seeker"
-                ? `Seeker pays: 50% · ₹${seekerFee.toLocaleString("en-IN")}`
+                ? `Seeker pays: strictly 15% · ₹${seekerFee.toLocaleString("en-IN")}`
                 : `Owner pays: strictly 15% · ₹${ownerFee.toLocaleString("en-IN")}`}
             </span>
             <span style={{ color: "var(--brand)" }}>Verified deal · Zero spam calls</span>
@@ -267,7 +267,7 @@ export const BrokerageWidget = memo(function BrokerageWidget() {
 
       {/* Transparent Model Footer */}
       <div className="vp-breakdown-footer">
-        <span className="vp-model-pill">Seeker: 50% (₹{seekerFee.toLocaleString("en-IN")})</span>
+        <span className="vp-model-pill">Seeker: 15% (₹{seekerFee.toLocaleString("en-IN")})</span>
         <span className="vp-model-pill">Owner: 15% (₹{ownerFee.toLocaleString("en-IN")})</span>
       </div>
     </div>
