@@ -100,9 +100,13 @@ export const properties = pgTable("properties", {
   index("properties_locality_idx").on(table.locality),
   index("properties_status_idx").on(table.status),
   index("properties_rental_status_idx").on(table.rentalStatus),
+  index("properties_price_idx").on(table.price),
+  index("properties_property_type_idx").on(table.propertyType),
+  index("properties_bhk_idx").on(table.bhkOrRoomType),
   index("properties_owner_idx").on(table.ownerId),
   index("properties_created_idx").on(table.createdAt),
   index("properties_live_lookup_idx").on(table.category, table.status, table.rentalStatus),
+  index("properties_search_sort_idx").on(table.category, table.status, table.verified, table.price),
 ]);
 
 export const leads = pgTable("leads", {

@@ -103,7 +103,31 @@ async function getCachedCityCounts(liveCondition: SQL | undefined) {
   }
 }
 
-export async function findProperties(filters: PropertyFilters = {}) {
+export type FindPropertiesResult = {
+  items: ReturnType<typeof serializePublicProperty>[];
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+  availableCities?: Array<{ name: string; count: number }>;
+};
+
+const findPropertiesCache = new Map<string, { timestamp: number; data: FindPropertiesResult }>();
+const CACHE_TTL_MS = 30_000;
+
+export function clearPropertiesCache() {
+  findPropertiesCache.clear();
+  cachedCities = null;
+}
+
+export async function findProperties(filters: PropertyFilters = {}): Promise<FindPropertiesResult> {
+  const cacheKey = JSON.stringify(filters);
+  const now = Date.now();
+  const cached = findPropertiesCache.get(cacheKey);
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   try {
     // Strict Live-Only Rule: Return only active, available properties
     // (status IN ('live', 'available_pending') AND status != 'rejected' AND rental_status != 'rented')
@@ -181,7 +205,7 @@ export async function findProperties(filters: PropertyFilters = {}) {
       getCachedCityCounts(liveCondition),
     ]);
 
-    return {
+    const result: FindPropertiesResult = {
       items: items.map(serializePublicProperty),
       total,
       page,
@@ -189,6 +213,14 @@ export async function findProperties(filters: PropertyFilters = {}) {
       limit,
       availableCities,
     };
+
+    findPropertiesCache.set(cacheKey, { timestamp: now, data: result });
+    if (findPropertiesCache.size > 200) {
+      const oldestKey = findPropertiesCache.keys().next().value;
+      if (oldestKey) findPropertiesCache.delete(oldestKey);
+    }
+
+    return result;
   } catch (error) {
     console.error("Database query failed in findProperties:", error);
     return {

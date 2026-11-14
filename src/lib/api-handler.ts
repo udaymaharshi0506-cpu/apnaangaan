@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { adminCallLogs, favorites, leadEvents, leads, managerRequests, meetings, notifications, otpChallenges, ownerInquiryView, properties, rentalDeals, savedSearches, transactionsLedger, uploadedImages, users, type Lead, type ManagerRequest, type Property, type RentalDeal, type TransactionLedger, type User } from "@/db/schema";
 import { attachAdminChallenge, attachSession, clearSession, getAuthUser, getPendingAdmin, hasRole, publicSelf, rotateSession, verifyAdminCode } from "@/lib/auth";
-import { findProperties, getProperty, getPropertyForLeadCreation, getUnavailablePropertyStatus, ownerPropertyColumns, publicPropertyColumns } from "@/lib/queries";
+import { clearPropertiesCache, findProperties, getProperty, getPropertyForLeadCreation, getUnavailablePropertyStatus, ownerPropertyColumns, publicPropertyColumns } from "@/lib/queries";
 import { DEFAULT_ADMIN_EMAIL, ensureAdminAccount } from "@/lib/seed";
 import { ACTIVE_MEETING_STATUSES, canTransitionMeetingStatus, formatMeetingStatus, getSlotConflictBounds, validateVisitSlot } from "@/lib/scheduling";
 import { serializeAdminLead, serializeAdminProperty, serializeCustomerLead, serializeOwnerInquiry, serializeOwnerLead, serializePublicMeeting, serializePublicProperty } from "@/lib/serializers";
@@ -1342,6 +1342,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       })
       .catch(() => null);
 
+    clearPropertiesCache();
     return respond({ property: serializePublicProperty(property), status: property.status, message: "Listing submitted for verification." }, 201);
   }
   if (segments[0] === "properties" && segments.length === 2 && ["PATCH", "DELETE"].includes(method)) {
@@ -1355,6 +1356,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     if (existing.ownerId !== user.id && !hasRole(user, "admin")) fail(403, "You do not have permission to modify this listing.");
     if (method === "DELETE") {
       await db.delete(properties).where(eq(properties.id, existing.id));
+      clearPropertiesCache();
       return respond({ message: "Listing permanently deleted." });
     }
     const input = await body(request, propertyPatchSchema);
@@ -1437,11 +1439,13 @@ async function handle(request: NextRequest, method: string, segments: string[]):
           updatedAt: new Date(),
         }).where(eq(properties.id, existing.id)).returning(ownerPropertyColumns);
         await sendNotification(user.id, "listing", `Your listing "${updated.title}" was resubmitted for verification.`, "/owner");
+        clearPropertiesCache();
         return respond({ property: serializePublicProperty(updated), status: updated.status, message: "Listing resubmitted for verification." });
       }
       const [updated] = await db.update(properties).set({ status: requestedStatus, updatedAt: new Date() }).where(eq(properties.id, existing.id)).returning(ownerPropertyColumns);
       const statusLabel = requestedStatus === "live" ? "is now live" : requestedStatus === "paused" ? "is now paused" : `has been marked as ${requestedStatus}`;
       await sendNotification(user.id, "listing", `Your listing "${updated.title}" ${statusLabel}.`, "/owner");
+      clearPropertiesCache();
       return respond({ property: serializePublicProperty(updated), status: updated.status });
     }
 
@@ -2548,6 +2552,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
         ? `Your listing "${property.title}" was not approved. Reason: ${reason?.trim() || "Listing did not meet guidelines."}`
         : `Your listing "${property.title}" status has been updated to ${nextStatus}.`;
       await sendNotification(property.ownerId, "listing", notificationMsg, "/owner");
+      clearPropertiesCache();
       return respond({ status: property.status, verified: property.verified, rejectionReason: property.rejectionReason });
     }
 
@@ -2556,6 +2561,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       const [existing] = await db.select().from(properties).where(eq(properties.id, id)).limit(1);
       if (!existing || existing.category !== "rent_home") fail(404, "Listing not found.");
       await db.delete(properties).where(eq(properties.id, id));
+      clearPropertiesCache();
       return respond({ message: "Listing permanently deleted by admin." });
     }
 

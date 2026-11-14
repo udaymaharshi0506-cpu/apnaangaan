@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Building2, ChevronDown, LayoutGrid, ListFilter, Map, MapPin, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Building2, ChevronDown, LayoutGrid, ListFilter, Map as MapIcon, MapPin, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { apiFetch, useApp } from "@/components/providers";
 import { PropertyCard } from "@/components/property-card";
 import { LocationSuggest } from "@/components/search-controls";
@@ -48,6 +48,8 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
   const router = useRouter();
   const { user, toast } = useApp();
   const [isPending, startTransition] = useTransition();
+  const cacheRef = useRef<Map<string, Result>>(new Map());
+  const [displayedResult, setDisplayedResult] = useState<Result>(result);
   const searchedLocation = initialFilters.location || initialFilters.city || initialFilters.q || "";
   const [query, setQuery] = useState(searchedLocation);
   const [liveCities, setLiveCities] = useState<Array<{ name: string; count: number }>>(
@@ -60,11 +62,13 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
   const filtersSignature = JSON.stringify(initialFilters);
 
   useEffect(() => {
+    cacheRef.current.set(filtersSignature, result);
+    setDisplayedResult(result);
     setDraft(initialFilters);
     setQuery(initialFilters.location || initialFilters.city || initialFilters.q || "");
     setMapView(initialFilters.view === "map");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersSignature]);
+  }, [filtersSignature, result]);
 
   useEffect(() => {
     if (!liveCities.length) {
@@ -85,6 +89,16 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
     const next = new URLSearchParams(initialFilters);
     for (const [key, value] of Object.entries(changes)) value ? next.set(key, value) : next.delete(key);
     if (!("page" in changes) && !("view" in changes)) next.delete("page");
+
+    // Fast client-side cache hit for instant tab and filter switching (0ms lag)
+    const nextObj: Record<string, string> = {};
+    next.forEach((val, k) => { nextObj[k] = val; });
+    const targetKey = JSON.stringify(nextObj);
+    const cached = cacheRef.current.get(targetKey);
+    if (cached) {
+      setDisplayedResult(cached);
+    }
+
     startTransition(() => {
       router.push(`/search${next.toString() ? `?${next}` : ""}`);
     });
@@ -141,18 +155,20 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
     <div className="search-main-bar"><form onSubmit={submitSearch}><LocationSuggest value={query} onChange={setQuery} onSubmit={(val) => { const clean = val.trim(); navigate({ location: clean || undefined, city: undefined, q: undefined }); }} placeholder="Search city, locality, or pin code..."/><button className="btn btn-primary" type="submit"><Search size={18}/> Search</button></form><button className="search-save-button" onClick={() => void saveSearch()} disabled={saving}><Sparkles size={16}/>{saving ? "Saving..." : "Save this search"}</button></div>
     <div className="search-category-scroll">{rentalTypes.map((item) => <button key={item.value} className={(initialFilters.propertyType === item.value || (!initialFilters.propertyType && !item.value)) ? "active" : ""} onClick={() => navigate({ propertyType: item.value || undefined })}>{item.label}</button>)}</div>
     <div className="search-body"><aside className="desktop-filters">{filters}</aside><div className="search-results">
-      <div className="results-toolbar"><div><strong>{result.total} {result.total === 1 ? "home" : "homes"} for rent</strong><span>Rental homes{searchedLocation ? ` · ${searchedLocation}` : ""}{initialFilters.propertyType ? ` · ${initialFilters.propertyType}` : ""}</span></div><div className="toolbar-actions"><button className="mobile-filter-button" onClick={() => setFilterOpen(true)}><SlidersHorizontal size={17}/> Filters {activeFilters > 0 && <b>{activeFilters}</b>}</button><label className="sort-select">Sort by <select value={initialFilters.sort || "relevance"} onChange={(e) => navigate({ sort: e.target.value === "relevance" ? undefined : e.target.value })}><option value="relevance">Recommended</option><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select><ChevronDown size={14}/></label><div className="view-toggle"><button className={!mapView ? "active" : ""} onClick={() => { setMapView(false); navigate({ view: undefined }); }} aria-label="List view"><LayoutGrid size={17}/></button><button className={mapView ? "active" : ""} onClick={() => { setMapView(true); navigate({ view: "map" }); }} aria-label="Map view"><Map size={17}/></button></div></div></div>
-      {isPending ? (
-        <PropertyCardSkeletonGrid count={result.items.length || 6} />
-      ) : result.items.length ? (
-        mapView ? (
-          <div className="map-results">
-            <div className="map-list">{result.items.map((property) => <PropertyCard key={property.id} property={property} compact/>)}</div>
-            <div className="map-canvas"><iframe title="Properties map" src={mapUrl} loading="lazy"/><div className="map-overlay-note"><MapPin size={16}/> Viewing the {first?.locality} area</div></div>
-          </div>
-        ) : (
-          <div className="search-grid">{result.items.map((property) => <PropertyCard key={property.id} property={property}/>)}</div>
-        )
+      <div className="results-toolbar"><div><strong>{displayedResult.total} {displayedResult.total === 1 ? "home" : "homes"} for rent</strong><span>Rental homes{searchedLocation ? ` · ${searchedLocation}` : ""}{initialFilters.propertyType ? ` · ${initialFilters.propertyType}` : ""}</span></div><div className="toolbar-actions"><button className="mobile-filter-button" onClick={() => setFilterOpen(true)}><SlidersHorizontal size={17}/> Filters {activeFilters > 0 && <b>{activeFilters}</b>}</button><label className="sort-select">Sort by <select value={initialFilters.sort || "relevance"} onChange={(e) => navigate({ sort: e.target.value === "relevance" ? undefined : e.target.value })}><option value="relevance">Recommended</option><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select><ChevronDown size={14}/></label><div className="view-toggle"><button className={!mapView ? "active" : ""} onClick={() => { setMapView(false); navigate({ view: undefined }); }} aria-label="List view"><LayoutGrid size={17}/></button><button className={mapView ? "active" : ""} onClick={() => { setMapView(true); navigate({ view: "map" }); }} aria-label="Map view"><MapIcon size={17}/></button></div></div></div>
+      {displayedResult.items.length === 0 && isPending ? (
+        <PropertyCardSkeletonGrid count={6} />
+      ) : displayedResult.items.length ? (
+        <div style={{ opacity: isPending ? 0.6 : 1, transition: "opacity 0.2s ease" }}>
+          {mapView ? (
+            <div className="map-results">
+              <div className="map-list">{displayedResult.items.map((property) => <PropertyCard key={property.id} property={property} compact/>)}</div>
+              <div className="map-canvas"><iframe title="Properties map" src={mapUrl} loading="lazy"/><div className="map-overlay-note"><MapPin size={16}/> Viewing the {first?.locality} area</div></div>
+            </div>
+          ) : (
+            <div className="search-grid">{displayedResult.items.map((property) => <PropertyCard key={property.id} property={property}/>)}</div>
+          )}
+        </div>
       ) : (
         <div className="empty-results empty-location-state">
           <div className="empty-results-icon-wrap"><Building2 size={36} strokeWidth={1.8}/></div>
@@ -192,7 +208,7 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
           )}
         </div>
       )}
-      {result.pages > 1 && <div className="pagination"><button disabled={result.page <= 1} onClick={() => navigate({ page: String(result.page - 1) })}><ArrowLeft size={16}/> Previous</button><span>Page {result.page} of {result.pages}</span><button disabled={result.page >= result.pages} onClick={() => navigate({ page: String(result.page + 1) })}>Next <ArrowRight size={16}/></button></div>}
+      {displayedResult.pages > 1 && <div className="pagination"><button disabled={displayedResult.page <= 1} onClick={() => navigate({ page: String(displayedResult.page - 1) })}><ArrowLeft size={16}/> Previous</button><span>Page {displayedResult.page} of {displayedResult.pages}</span><button disabled={displayedResult.page >= displayedResult.pages} onClick={() => navigate({ page: String(displayedResult.page + 1) })}>Next <ArrowRight size={16}/></button></div>}
     </div></div>
     <div className="search-bottom-note"><BadgeCheck size={18}/><span>Every verified rental home has been reviewed by our team. Your details are never shared directly with an owner.</span><Link href="/privacy">Learn more <ArrowUpRight size={14}/></Link></div>
   </div>{filterOpen && <div className="filter-modal-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-modal" onClick={(e) => e.stopPropagation()}><div className="sheet-drag-handle" />{filters}</div></div>}</main>;
