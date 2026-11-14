@@ -208,7 +208,31 @@ export function SearchExperience({ result, initialFilters }: { result: Result; i
           )}
         </div>
       )}
-      {displayedResult.pages > 1 && <div className="pagination"><button disabled={displayedResult.page <= 1} onClick={() => navigate({ page: String(displayedResult.page - 1) })}><ArrowLeft size={16}/> Previous</button><span>Page {displayedResult.page} of {displayedResult.pages}</span><button disabled={displayedResult.page >= displayedResult.pages} onClick={() => navigate({ page: String(displayedResult.page + 1) })}>Next <ArrowRight size={16}/></button></div>}
+      {displayedResult.pages > 1 && (
+        <div className="pagination">
+          <button
+            disabled={displayedResult.page <= 1}
+            onClick={() => {
+              window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+              navigate({ page: String(displayedResult.page - 1) });
+            }}
+          >
+            <ArrowLeft size={16} /> Previous
+          </button>
+          <span>
+            Page {displayedResult.page} of {displayedResult.pages}
+          </span>
+          <button
+            disabled={displayedResult.page >= displayedResult.pages}
+            onClick={() => {
+              window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+              navigate({ page: String(displayedResult.page + 1) });
+            }}
+          >
+            Next <ArrowRight size={16} />
+          </button>
+        </div>
+      )}
     </div></div>
     <div className="search-bottom-note"><BadgeCheck size={18}/><span>Every verified rental home has been reviewed by our team. Your details are never shared directly with an owner.</span><Link href="/privacy">Learn more <ArrowUpRight size={14}/></Link></div>
   </div>{filterOpen && <div className="filter-modal-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-modal" onClick={(e) => e.stopPropagation()}><div className="sheet-drag-handle" />{filters}</div></div>}</main>;

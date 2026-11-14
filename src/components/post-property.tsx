@@ -891,6 +891,7 @@ export function PostPropertyExperience() {
 
   function handleSelectSelfListing() {
     setListingFlowMode("self_form");
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     toast("Self-Listing mode selected. Fill in your property details below.", "info");
   }
 
@@ -1264,7 +1265,12 @@ export function PostPropertyExperience() {
               <button
                 key={label}
                 className={`${index === step ? "active" : ""} ${index < step ? "complete" : ""}`}
-                onClick={() => index < step && setStep(index)}
+                onClick={() => {
+                  if (index < step) {
+                    setStep(index);
+                    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+                  }
+                }}
               >
                 <span>{index < step ? <Check size={15} /> : String(index + 1).padStart(2, "0")}</span>
                 {label}
@@ -2123,6 +2129,7 @@ export function PostPropertyExperience() {
                   onClick={() => {
                     setStep(step - 1);
                     setError("");
+                    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
                   }}
                 >
                   <ArrowLeft size={17} /> Previous

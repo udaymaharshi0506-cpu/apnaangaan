@@ -129,7 +129,13 @@ function HeaderLocationPicker({ pathname }: { pathname: string }) {
       </button>
 
       {open && (
-        <div className="city-popover" role="dialog" aria-label="Search rental location">
+        <>
+          <div
+            className="city-popover-backdrop"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="city-popover" role="dialog" aria-label="Search rental location">
           <div className="city-popover-search">
             <Search size={15} className="city-popover-search-icon" />
             <input
@@ -260,6 +266,7 @@ function HeaderLocationPicker({ pathname }: { pathname: string }) {
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   );
@@ -315,9 +322,21 @@ export function SiteShell({ children }: { children: ReactNode }) {
     };
   }, [notificationsOpen]);
 
-  // Close notifications popover on route change
+  // Prevent browser from restoring bottom scroll position on route changes or refreshes
+  useEffect(() => {
+    if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+  }, []);
+
+  // Force instant scroll to top (0, 0) and close notifications on route change
   useEffect(() => {
     setNotificationsOpen(false);
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    if (typeof document !== "undefined") {
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
   }, [pathname]);
 
 

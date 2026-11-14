@@ -64,6 +64,11 @@ export function PropertyDetail({ property, similar, isOwner = false, isAdmin = f
   const touchStartX = useRef<number | null>(null);
   const thumbListRef = useRef<HTMLDivElement>(null);
 
+  // Scroll to top on property change
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [property.id]);
+
   // Keyboard navigation & touch-swipe support for lightbox
   useEffect(() => {
     if (!galleryOpen) {
