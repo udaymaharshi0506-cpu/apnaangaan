@@ -44,13 +44,10 @@ export function RouteProgress() {
         const href = anchor.getAttribute("href");
         if (!href) return;
 
-        // Skip external, anchors, mailto, tel, target _blank, or modifier clicks
+        // Only intercept valid relative internal routes (must start with / and not //)
         if (
-          href.startsWith("http://") ||
-          href.startsWith("https://") ||
-          href.startsWith("#") ||
-          href.startsWith("mailto:") ||
-          href.startsWith("tel:") ||
+          !href.startsWith("/") ||
+          href.startsWith("//") ||
           anchor.target === "_blank" ||
           e.ctrlKey ||
           e.metaKey ||

@@ -2983,18 +2983,28 @@
   }
 }
 
-@media (max-width: 640px) {
-  /* Multi-step Post Property Form Layout */
-  .form-two-cols {
+@media (max-width: 768px) {
+  /* Multi-step Post Property Form Layout & Profile Layout */
+  .form-two-cols,
+  .profile-form-row {
     grid-template-columns: 1fr !important;
     gap: 14px !important;
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
   }
-  .form-two-cols > div {
+  .form-two-cols > div,
+  .profile-form-row > label,
+  .profile-form-row > div {
     width: 100% !important;
     min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  .profile-phone input,
+  .profile-form-row input {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
   .form-input,
   .phone-field {
