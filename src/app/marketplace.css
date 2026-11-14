@@ -697,14 +697,14 @@
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    z-index: 70 !important;
+    z-index: 150 !important;
     align-items: center !important;
     justify-content: space-between !important;
     gap: 10px !important;
     background: var(--surface) !important;
     border-top: 1px solid var(--border) !important;
-    box-shadow: 0 -5px 18px rgba(0,0,0,.08) !important;
-    padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    box-shadow: 0 -8px 25px rgba(0,0,0,.12) !important;
+    padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
 
