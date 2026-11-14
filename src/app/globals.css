@@ -1054,6 +1054,12 @@ html[data-theme="dark"] .skeleton{background:linear-gradient(90deg,#213434 0%,rg
   .back-to-top {
     display: none !important;
   }
+  body:has(input:focus, textarea:focus, select:focus) .mobile-tabbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(100%) !important;
+    transition: transform 0.2s ease, opacity 0.2s ease !important;
+  }
   .form-two-cols,
   .profile-form-row {
     display: flex !important;

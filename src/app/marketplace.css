@@ -1856,30 +1856,33 @@
   border-color: var(--ink-soft);
 }
 
-@media (max-width: 639px) {
+@media (max-width: 768px) {
   .notifications-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.28);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    z-index: 140;
-    animation: backdropFadeIn 0.2s ease forwards;
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    background: rgba(0, 0, 0, 0.35) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    z-index: 140 !important;
+    animation: backdropFadeIn 0.2s ease forwards !important;
   }
 
   .notifications-popover {
     position: fixed !important;
-    top: 72px !important;
+    top: calc(65px + env(safe-area-inset-top, 0px)) !important;
     left: 12px !important;
     right: 12px !important;
-    width: auto !important;
-    max-width: none !important;
-    max-height: 75vh !important;
-    border-radius: 20px !important;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+    width: calc(100% - 24px) !important;
+    max-width: 440px !important;
+    margin-inline: auto !important;
+    max-height: calc(80vh - env(safe-area-inset-top, 0px)) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28), 0 4px 16px rgba(0, 0, 0, 0.1) !important;
     z-index: 150 !important;
     animation: popoverMobileIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
   }
 
   .popover-close-btn {

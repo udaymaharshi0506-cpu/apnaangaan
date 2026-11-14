@@ -151,6 +151,10 @@ test("e2e enquiry blocking, double-booking prevention, and cross-dashboard visit
       seekerOneCookie
     );
     assert.equal(pausedInquiry.status, 422);
+    const pausedData = await pausedInquiry.json();
+    assert.ok(pausedData.error.toLowerCase().includes("paused"));
+    const [orphanLead] = await db.select().from(leads).where(eq(leads.propertyId, property.id));
+    assert.equal(orphanLead, undefined, "No orphan lead record must be created when listing is paused");
 
     // Deleted/non-existent listing blocked with 404
     const deletedInquiry = await call(
@@ -166,6 +170,8 @@ test("e2e enquiry blocking, double-booking prevention, and cross-dashboard visit
       seekerOneCookie
     );
     assert.equal(deletedInquiry.status, 404);
+    const [orphanDeletedLead] = await db.select().from(leads).where(eq(leads.propertyId, "00000000-0000-4000-8000-000000000999"));
+    assert.equal(orphanDeletedLead, undefined, "No orphan lead record must be created when listing is deleted");
 
     // Activate listing to live
     await db.update(properties).set({ status: "live", verified: true }).where(eq(properties.id, property.id));
