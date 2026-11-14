@@ -36,6 +36,13 @@ const NO_STORE_HEADERS = {
   Expires: "0",
 } as const;
 const respond = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: NO_STORE_HEADERS });
+const respondCached = (data: unknown, maxAge = 60, staleWhileRevalidate = 120, status = 200) =>
+  NextResponse.json(data, {
+    status,
+    headers: {
+      "Cache-Control": `public, s-maxage=${maxAge}, stale-while-revalidate=${staleWhileRevalidate}`,
+    },
+  });
 const safeNumber = (value: string | null) => value !== null && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined;
 const pageFrom = (request: NextRequest) => Math.max(1, Math.min(10000, Number(request.nextUrl.searchParams.get("page")) || 1));
 
@@ -346,6 +353,17 @@ const propertyDraftInput = z.object({
 
 const propertyPatchSchema = z.object({
   ...propertyRawFields,
+  // Draft PATCHes must allow empty images array without 422 error
+  images: z
+    .array(
+      z
+        .string()
+        .trim()
+        .max(2000)
+        .refine((value) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("/"), "Use a valid image URL.")
+    )
+    .max(MAX_LISTING_IMAGES, `Maximum ${MAX_LISTING_IMAGES} photos allowed.`)
+    .optional(),
   status: z.enum(["draft", "paused", "rented", "live", "pending_review"]),
 }).partial();
 
@@ -921,19 +939,27 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
       const suggestions = allItems.slice(0, 10).map((it) => it.name);
 
-      return respond({
-        suggestions: suggestions.length > 0 ? suggestions : filterLocationSuggestions(q, [], fallbackCities, 8),
-        items: allItems.slice(0, 10),
-        availableCities: availableCities.length > 0 ? availableCities : fallbackCities.slice(0, 6).map((name) => ({ name, count: 0 })),
-      });
+      return respondCached(
+        {
+          suggestions: suggestions.length > 0 ? suggestions : filterLocationSuggestions(q, [], fallbackCities, 8),
+          items: allItems.slice(0, 10),
+          availableCities: availableCities.length > 0 ? availableCities : fallbackCities.slice(0, 6).map((name) => ({ name, count: 0 })),
+        },
+        300,
+        600
+      );
     } catch (err) {
       console.warn("Locations lookup fallback due to DB connection:", err);
       const fallbackItems: Array<{ name: string; count: number; type: "city" | "locality" | "pin" }> = fallbackCities.slice(0, 6).map((name) => ({ name, count: 0, type: "city" }));
-      return respond({
-        suggestions: filterLocationSuggestions(q, [], fallbackCities, 8),
-        items: fallbackItems,
-        availableCities: fallbackItems.map((f) => ({ name: f.name, count: 0 })),
-      });
+      return respondCached(
+        {
+          suggestions: filterLocationSuggestions(q, [], fallbackCities, 8),
+          items: fallbackItems,
+          availableCities: fallbackItems.map((f) => ({ name: f.name, count: 0 })),
+        },
+        60,
+        120
+      );
     }
   }
 
@@ -1033,7 +1059,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
       }
     }
 
-    return respond(
+    return respondCached(
       await findProperties({
         category: "rent_home",
         city: params.get("city") || undefined,

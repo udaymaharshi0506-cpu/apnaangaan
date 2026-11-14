@@ -6,7 +6,7 @@ import { ScrollReveal } from "@/components/scroll-reveal";
 import { ValuePropositions } from "@/components/value-propositions";
 import { findProperties, getTopNeighborhoods } from "@/lib/queries";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function HomePage() {
   const [result, neighborhoods] = await Promise.all([

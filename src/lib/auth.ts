@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { cache } from "react";
 import { db } from "@/db";
 import { refreshTokens, users, type User } from "@/db/schema";
 import { and, eq, gt, isNull } from "drizzle-orm";
@@ -79,12 +80,12 @@ export async function getAuthUser(request: Request): Promise<User | null> {
   }
 }
 
-export async function getServerUser(): Promise<User | null> {
+export const getServerUser = cache(async (): Promise<User | null> => {
   try {
     const token = (await cookies()).get(ACCESS_COOKIE)?.value;
     return await resolveUserFromAccessToken(token);
   } catch { return null; }
-}
+});
 
 export const hasRole = (user: User | null, role: "customer" | "owner" | "admin") => {
   if (!user || !Array.isArray(user.roles)) return false;

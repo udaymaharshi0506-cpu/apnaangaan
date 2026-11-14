@@ -1,13 +1,28 @@
 import type { Metadata } from "next";
+import dynamicImport from "next/dynamic";
 import { notFound, redirect } from "next/navigation";
-import { LoginExperience, SetupExperience, WelcomeExperience } from "@/components/auth-experiences";
-import { SignupExperience } from "@/components/signup-experience";
-import { InquiriesExperience, NotificationsExperience, OwnerExperience, ProfileExperience, SavedExperience } from "@/components/member-experiences";
-import { PostPropertyExperience } from "@/components/post-property";
-import { PrivacyContent } from "@/components/privacy-content";
-import { SearchExperience } from "@/components/search-experience";
 import { getServerUser, hasRole } from "@/lib/auth";
 import { findProperties } from "@/lib/queries";
+
+const ExperienceFallback = () => (
+  <div className="container" style={{ padding: "40px 16px", minHeight: "60vh" }}>
+    <div style={{ height: "320px", borderRadius: "16px", background: "var(--surface-soft, rgba(0,0,0,0.04))" }} />
+  </div>
+);
+
+// Route-level code-splitting to eliminate monolithic bundles on dynamic section routes
+const SearchExperience = dynamicImport(() => import("@/components/search-experience").then((m) => m.SearchExperience), { loading: ExperienceFallback });
+const LoginExperience = dynamicImport(() => import("@/components/auth-experiences").then((m) => m.LoginExperience), { loading: ExperienceFallback });
+const SignupExperience = dynamicImport(() => import("@/components/signup-experience").then((m) => m.SignupExperience), { loading: ExperienceFallback });
+const SetupExperience = dynamicImport(() => import("@/components/auth-experiences").then((m) => m.SetupExperience), { loading: ExperienceFallback });
+const WelcomeExperience = dynamicImport(() => import("@/components/auth-experiences").then((m) => m.WelcomeExperience), { loading: ExperienceFallback });
+const SavedExperience = dynamicImport(() => import("@/components/member-experiences").then((m) => m.SavedExperience), { loading: ExperienceFallback });
+const InquiriesExperience = dynamicImport(() => import("@/components/member-experiences").then((m) => m.InquiriesExperience), { loading: ExperienceFallback });
+const OwnerExperience = dynamicImport(() => import("@/components/member-experiences").then((m) => m.OwnerExperience), { loading: ExperienceFallback });
+const PostPropertyExperience = dynamicImport(() => import("@/components/post-property").then((m) => m.PostPropertyExperience), { loading: ExperienceFallback });
+const ProfileExperience = dynamicImport(() => import("@/components/member-experiences").then((m) => m.ProfileExperience), { loading: ExperienceFallback });
+const NotificationsExperience = dynamicImport(() => import("@/components/member-experiences").then((m) => m.NotificationsExperience), { loading: ExperienceFallback });
+const PrivacyContent = dynamicImport(() => import("@/components/privacy-content").then((m) => m.PrivacyContent), { loading: ExperienceFallback });
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ section: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };

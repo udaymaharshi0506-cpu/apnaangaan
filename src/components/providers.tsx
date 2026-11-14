@@ -150,7 +150,8 @@ function clearClientAuthStorage() {
     sessionStorage.clear();
   } catch { /* ignore storage restrictions */ }
   try {
-    for (const key of ["aangan-property-draft-v2", "aangan-recent", "aangan-onboarded"]) {
+    // Preserve local listing drafts (aangan-property-draft-v2) so user data is never lost across sign-outs/glitches
+    for (const key of ["aangan-recent", "aangan-onboarded"]) {
       localStorage.removeItem(key);
     }
   } catch { /* ignore storage restrictions */ }
@@ -202,8 +203,19 @@ export function AppProviders({ children }: { children: ReactNode }) {
     try {
       const data = await apiFetch<{ user: SessionUser | null }>("/api/auth/me");
       setUser(data.user);
-    } catch { setUser(null); }
-    finally { setLoading(false); }
+    } catch (err) {
+      // Only set user to null on explicit 401 unauthenticated response; preserve user on network drop/timeout
+      if (
+        err instanceof Error &&
+        (err.message.includes("401") ||
+          err.message.toLowerCase().includes("unauthorized") ||
+          err.message.toLowerCase().includes("session expired"))
+      ) {
+        setUser(null);
+      }
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { void refreshUser(); }, [refreshUser]);
 
@@ -259,8 +271,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(() => {
+      // Pause polling when browser tab is hidden to save mobile data, battery, and server capacity
+      if (typeof document !== "undefined" && document.hidden) return;
       void refreshNotifications();
-    }, 12000);
+    }, 30000);
 
     const onFocus = () => {
       void refreshNotifications();
@@ -362,14 +376,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
     };
   }, [pathname, redirectAfterSignOut, resetSignedOutState, router]);
 
-  // Prevent browser Back button / bfcache from showing cached authenticated dashboards
+  // Re-verify session on bfcache restore or tab visibility without reloading & destroying form state
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted && isProtectedRoute(pathname)) {
-        window.location.reload();
-        return;
-      }
       if (isProtectedRoute(pathname)) {
         void refreshUser();
       }

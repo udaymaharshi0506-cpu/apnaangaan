@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 export function RouteProgress() {
@@ -8,16 +8,27 @@ export function RouteProgress() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
 
+  const t1Ref = useRef<NodeJS.Timeout | null>(null);
+  const t2Ref = useRef<NodeJS.Timeout | null>(null);
+  const finishRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearTimers = () => {
+    if (t1Ref.current) { clearTimeout(t1Ref.current); t1Ref.current = null; }
+    if (t2Ref.current) { clearTimeout(t2Ref.current); t2Ref.current = null; }
+    if (finishRef.current) { clearTimeout(finishRef.current); finishRef.current = null; }
+  };
+
   useEffect(() => {
     // When pathname changes, complete and dismiss the bar
     if (loading) {
+      clearTimers();
       setProgress(100);
-      const timer = setTimeout(() => {
+      finishRef.current = setTimeout(() => {
         setLoading(false);
         setProgress(0);
       }, 300);
-      return () => clearTimeout(timer);
     }
+    return () => clearTimers();
   }, [pathname, loading]);
 
   useEffect(() => {
@@ -52,20 +63,16 @@ export function RouteProgress() {
         const currentPath = window.location.pathname;
         if (href === currentPath) return;
 
+        clearTimers();
         setLoading(true);
         setProgress(30);
 
-        const t1 = setTimeout(() => setProgress(75), 150);
+        t1Ref.current = setTimeout(() => setProgress(75), 150);
         // Safety timeout: dismiss if navigation takes too long or is canceled
-        const t2 = setTimeout(() => {
+        t2Ref.current = setTimeout(() => {
           setLoading(false);
           setProgress(0);
         }, 4000);
-
-        return () => {
-          clearTimeout(t1);
-          clearTimeout(t2);
-        };
       } catch {
         // Silently ignore to never block browser navigation
       }
@@ -74,6 +81,7 @@ export function RouteProgress() {
     document.addEventListener("click", handleLinkClick, { capture: true });
     return () => {
       document.removeEventListener("click", handleLinkClick, { capture: true });
+      clearTimers();
     };
   }, []);
 

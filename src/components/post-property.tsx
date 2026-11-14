@@ -332,6 +332,7 @@ export function PostPropertyExperience() {
   });
 
   const submitLockRef = useRef(false);
+  const isHydratedRef = useRef(false);
   const selfieInputRef = useRef<HTMLInputElement>(null);
   const aadhaarInputRef = useRef<HTMLInputElement>(null);
   const photosInputRef = useRef<HTMLInputElement>(null);
@@ -433,6 +434,8 @@ export function PostPropertyExperience() {
       }
     } catch {
       // Ignore draft read errors
+    } finally {
+      isHydratedRef.current = true;
     }
   }, [toast]);
 
@@ -444,8 +447,12 @@ export function PostPropertyExperience() {
   }, [form.category]);
 
   useEffect(() => {
-    if (!editId) {
+    // Never overwrite saved draft until hydration has completed
+    if (!isHydratedRef.current || editId) return;
+    try {
       localStorage.setItem("aangan-property-draft-v2", JSON.stringify({ ...form, category: "rent_home" }));
+    } catch {
+      // Storage quota or private browsing mode
     }
   }, [form, editId]);
 

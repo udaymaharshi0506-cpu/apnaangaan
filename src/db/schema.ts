@@ -94,7 +94,16 @@ export const properties = pgTable("properties", {
   monthlyRent: bigint("monthly_rent", { mode: "number" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("properties_category_idx").on(table.category), index("properties_city_idx").on(table.city), index("properties_status_idx").on(table.status), index("properties_created_idx").on(table.createdAt)]);
+}, (table) => [
+  index("properties_category_idx").on(table.category),
+  index("properties_city_idx").on(table.city),
+  index("properties_locality_idx").on(table.locality),
+  index("properties_status_idx").on(table.status),
+  index("properties_rental_status_idx").on(table.rentalStatus),
+  index("properties_owner_idx").on(table.ownerId),
+  index("properties_created_idx").on(table.createdAt),
+  index("properties_live_lookup_idx").on(table.category, table.status, table.rentalStatus),
+]);
 
 export const leads = pgTable("leads", {
   id: uuid("id").defaultRandom().primaryKey(),

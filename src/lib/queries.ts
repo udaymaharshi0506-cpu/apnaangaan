@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { db } from "@/db";
 import { properties } from "@/db/schema";
 import { expandLocationSearchVariants } from "@/lib/search-utils";
@@ -78,6 +79,30 @@ export type PropertyFilters = {
 
 export { categoryLabel, formatIndianCurrency, formatPrice } from "@/lib/format";
 
+// 60-second in-memory cache for live city listing counts to eliminate redundant GROUP BY queries
+let cachedCities: { timestamp: number; data: Array<{ name: string; count: number }> } | null = null;
+async function getCachedCityCounts(liveCondition: SQL | undefined) {
+  const now = Date.now();
+  if (cachedCities && now - cachedCities.timestamp < 60000) {
+    return cachedCities.data;
+  }
+  try {
+    const cityCounts = await db
+      .select({ city: properties.city, count: count() })
+      .from(properties)
+      .where(liveCondition)
+      .groupBy(properties.city)
+      .orderBy(desc(count()));
+    const data = cityCounts
+      .filter((c) => c.city && c.city.trim().length > 0)
+      .map((c) => ({ name: c.city.trim(), count: Number(c.count) }));
+    cachedCities = { timestamp: now, data };
+    return data;
+  } catch {
+    return cachedCities?.data || [];
+  }
+}
+
 export async function findProperties(filters: PropertyFilters = {}) {
   try {
     // Strict Live-Only Rule: Return only active, available properties
@@ -150,15 +175,11 @@ export async function findProperties(filters: PropertyFilters = {}) {
       ne(properties.rentalStatus, "rented")
     );
 
-    const [items, [{ total }], cityCounts] = await Promise.all([
+    const [items, [{ total }], availableCities] = await Promise.all([
       db.select(publicPropertyColumns).from(properties).where(where).orderBy(...sorting).limit(limit).offset((page - 1) * limit),
       db.select({ total: count() }).from(properties).where(where),
-      db.select({ city: properties.city, count: count() }).from(properties).where(liveCondition).groupBy(properties.city).orderBy(desc(count())),
+      getCachedCityCounts(liveCondition),
     ]);
-
-    const availableCities = cityCounts
-      .filter((c) => c.city && c.city.trim().length > 0)
-      .map((c) => ({ name: c.city.trim(), count: Number(c.count) }));
 
     return {
       items: items.map(serializePublicProperty),
@@ -188,7 +209,7 @@ export async function findProperties(filters: PropertyFilters = {}) {
   }
 }
 
-export async function getProperty(id: string, includeInactive = false) {
+export const getProperty = cache(async (id: string, includeInactive = false) => {
   try {
     const [property] = await db
       .select(publicPropertyColumns)
@@ -204,7 +225,7 @@ export async function getProperty(id: string, includeInactive = false) {
     console.error("Database query failed in getProperty:", error);
     return null;
   }
-}
+});
 
 /** Server-only lookup for lead creation: fetches public columns + internal ownerId (never serialized in responses). */
 export async function getPropertyForLeadCreation(id: string) {
@@ -251,7 +272,7 @@ export async function getSimilarProperties(property: PublicPropertyInput, limit 
   }
 }
 
-export async function getTopNeighborhoods() {
+export const getTopNeighborhoods = cache(async () => {
   try {
     const rows = await db
       .select({
@@ -261,7 +282,8 @@ export async function getTopNeighborhoods() {
       })
       .from(properties)
       .where(and(eq(properties.status, "live"), eq(properties.category, "rent_home")))
-      .orderBy(desc(properties.views));
+      .orderBy(desc(properties.views))
+      .limit(30);
 
     const seen = new Set<string>();
     const neighborhoods: Array<{ name: string; city: string; image: string }> = [];
@@ -290,4 +312,4 @@ export async function getTopNeighborhoods() {
     { name: "Bandra West", city: "Mumbai", image: "https://images.pexels.com/photos/7018401/pexels-photo-7018401.jpeg?auto=compress&cs=tinysrgb&w=850" },
     { name: "Cyber City", city: "Gurugram", image: "https://images.pexels.com/photos/31737842/pexels-photo-31737842.jpeg?auto=compress&cs=tinysrgb&w=850" },
   ];
-}
+});
