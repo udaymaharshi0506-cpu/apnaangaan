@@ -12,12 +12,14 @@ export function ScrollReveal({
   threshold?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [revealed, setRevealed] = useState(false);
+  const [revealed, setRevealed] = useState(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) return true;
+    return false;
+  });
 
   useEffect(() => {
-    // On mobile devices, reveal immediately to prevent any blank screen or lag
+    // On mobile devices, reveal immediately to prevent any movement or lag
     if (typeof window !== "undefined" && window.innerWidth <= 768) {
-      setRevealed(true);
       return;
     }
 

@@ -108,10 +108,14 @@ function AnimatedBar({ value, max, color, animate }: { value: number; max: numbe
 export const BrokerageWidget = memo(function BrokerageWidget() {
   const [role, setRole] = useState<"seeker" | "owner">("seeker");
   const [rent, setRent] = useState(25000);
-  const [animate, setAnimate] = useState(false);
+  const [animate, setAnimate] = useState(() => (typeof window !== "undefined" && window.innerWidth <= 768));
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      setAnimate(true);
+      return;
+    }
     const fallback = setTimeout(() => setAnimate(true), 400);
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") {
@@ -286,6 +290,12 @@ export const PrivacyShieldWidget = memo(function PrivacyShieldWidget() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Keep fully static on phone screens to prevent continuous layout shifts while scrolling
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      setStep(spamCalls.length);
+      return;
+    }
+
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
 
