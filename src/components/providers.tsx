@@ -381,7 +381,29 @@ export function AppProviders({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return;
     const handlePageShow = (event: PageTransitionEvent) => {
       if (isProtectedRoute(pathname)) {
-        void refreshUser();
+        if (event.persisted) {
+          // BFCache restored this protected view (e.g. Back button pressed after logout)
+          // Immediately re-validate with server to prevent viewing stale/cached private data
+          fetch("/api/auth/me", { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : { user: null }))
+            .then((data) => {
+              if (!data?.user) {
+                clearClientAuthStorage();
+                const target = pathname.startsWith("/admin") ? "/admin/login" : `/login?next=${encodeURIComponent(pathname)}`;
+                window.location.replace(target);
+              } else {
+                setUser(data.user);
+                if (pathname.startsWith("/admin") && !data.user.roles?.includes("admin")) {
+                  window.location.replace("/");
+                }
+              }
+            })
+            .catch(() => {
+              window.location.replace(pathname.startsWith("/admin") ? "/admin/login" : "/login");
+            });
+        } else {
+          void refreshUser();
+        }
       }
     };
     const handleVisibility = () => {

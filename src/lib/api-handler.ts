@@ -635,7 +635,12 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const now = new Date();
     const [previous] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
 
-    const isTestDomain = identifier.endsWith("@example.com") || identifier.endsWith("@apnaangaan.in") || identifier.includes("test") || process.env.NODE_ENV === "test";
+    const isTestDomain =
+      identifier.endsWith("@example.com") ||
+      identifier.endsWith("@apnaangaan.in") ||
+      identifier.includes("test") ||
+      identifier.startsWith("+9198765438") ||
+      process.env.NODE_ENV === "test";
 
     if (!isTestDomain && previous && now.getTime() - previous.requestedAt.getTime() < 15000) {
       fail(429, "Please wait 15 seconds before requesting another code.");
@@ -718,17 +723,27 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
       // Verify OTP challenge strictly
       const [challenge] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
-      if (!challenge || challenge.expiresAt < now || challenge.attempts >= 5) {
-        fail(400, "Verification code has expired or too many attempts. Please request a new code.");
+      if (!challenge || challenge.codeHash === "used" || challenge.codeHash === "locked" || challenge.expiresAt < now || challenge.attempts >= 5) {
+        fail(400, "Verification code has expired, already used, or locked due to too many attempts. Please request a new code.");
       }
-
-      await db.update(otpChallenges).set({ attempts: challenge.attempts + 1 }).where(eq(otpChallenges.phone, identifier));
 
       const expected = Buffer.from(challenge.codeHash);
       const actual = Buffer.from(createHash("sha256").update(input.code).digest("hex"));
       const isTestBypass = process.env.NODE_ENV !== "production" && input.code === "123456";
-      if (!isTestBypass && (expected.length !== actual.length || !timingSafeEqual(expected, actual))) {
-        fail(400, "That verification code is not correct.");
+      const isMatch = isTestBypass || (expected.length === actual.length && timingSafeEqual(expected, actual));
+
+      if (!isMatch) {
+        const newAttempts = challenge.attempts + 1;
+        await db.update(otpChallenges).set({
+          attempts: newAttempts,
+          ...(newAttempts >= 5 ? { codeHash: "locked" } : {}),
+        }).where(eq(otpChallenges.phone, identifier));
+
+        if (newAttempts >= 5) {
+          fail(400, "Too many incorrect attempts. This verification code has been locked. Please request a new code.");
+        }
+        const remaining = 5 - newAttempts;
+        fail(400, `That verification code is not correct. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`);
       }
 
       await db.update(otpChallenges).set({ codeHash: "used", expiresAt: now, attempts: 5 }).where(eq(otpChallenges.phone, identifier));
@@ -763,17 +778,27 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     await assertNotAdminIdentifier(identifier, isEmail);
 
     const [challenge] = await db.select().from(otpChallenges).where(eq(otpChallenges.phone, identifier)).limit(1);
-    if (!challenge || challenge.expiresAt < new Date() || challenge.attempts >= 5) {
-      fail(400, "Code expired or too many attempts. Request a new code.");
+    if (!challenge || challenge.codeHash === "used" || challenge.codeHash === "locked" || challenge.expiresAt < new Date() || challenge.attempts >= 5) {
+      fail(400, "Code expired, already used, or locked due to too many attempts. Request a new code.");
     }
-
-    await db.update(otpChallenges).set({ attempts: challenge.attempts + 1 }).where(eq(otpChallenges.phone, identifier));
 
     const expected = Buffer.from(challenge.codeHash);
     const actual = Buffer.from(createHash("sha256").update(input.code).digest("hex"));
     const isTestBypass = process.env.NODE_ENV !== "production" && input.code === "123456";
-    if (!isTestBypass && (expected.length !== actual.length || !timingSafeEqual(expected, actual))) {
-      fail(400, "That code is not correct.");
+    const isMatch = isTestBypass || (expected.length === actual.length && timingSafeEqual(expected, actual));
+
+    if (!isMatch) {
+      const newAttempts = challenge.attempts + 1;
+      await db.update(otpChallenges).set({
+        attempts: newAttempts,
+        ...(newAttempts >= 5 ? { codeHash: "locked" } : {}),
+      }).where(eq(otpChallenges.phone, identifier));
+
+      if (newAttempts >= 5) {
+        fail(400, "Too many incorrect attempts. This code has been locked. Please request a new code.");
+      }
+      const remaining = 5 - newAttempts;
+      fail(400, `That code is not correct. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`);
     }
 
     await db.update(otpChallenges).set({ codeHash: "used", expiresAt: new Date(), attempts: 5 }).where(eq(otpChallenges.phone, identifier));
@@ -841,7 +866,56 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     const admin = await getPendingAdmin(request);
     if (!admin) throw new HttpError(401, "Your login challenge has expired. Please start again.");
     const { code } = await body(request, z.object({ code: z.string().regex(/^\d{6}$/) }));
-    if (!verifyAdminCode(code)) fail(401, "Incorrect authenticator code.");
+
+    const challengeKey = `admin_2fa:${admin.id}`;
+    const [challenge] = await db
+      .select()
+      .from(otpChallenges)
+      .where(eq(otpChallenges.phone, challengeKey))
+      .limit(1);
+
+    if (challenge && challenge.attempts >= 5) {
+      const res = NextResponse.json(
+        { error: "Too many incorrect 2FA attempts. Challenge locked. Please log in again." },
+        { status: 429 }
+      );
+      res.cookies.set("aangan_admin_challenge", "", { maxAge: 0, path: "/" });
+      return res;
+    }
+
+    const isValid = verifyAdminCode(code);
+    if (!isValid) {
+      const newAttempts = (challenge?.attempts || 0) + 1;
+      const now = new Date();
+      await db
+        .insert(otpChallenges)
+        .values({
+          phone: challengeKey,
+          codeHash: "admin_totp",
+          expiresAt: new Date(now.getTime() + 5 * 60000),
+          attempts: newAttempts,
+          requestCount: 1,
+          windowStartedAt: now,
+          requestedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: otpChallenges.phone,
+          set: { attempts: newAttempts },
+        });
+
+      if (newAttempts >= 5) {
+        const res = NextResponse.json(
+          { error: "Too many incorrect 2FA attempts. Challenge locked. Please log in again." },
+          { status: 429 }
+        );
+        res.cookies.set("aangan_admin_challenge", "", { maxAge: 0, path: "/" });
+        return res;
+      }
+      const remaining = 5 - newAttempts;
+      fail(401, `Incorrect authenticator code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`);
+    }
+
+    await db.delete(otpChallenges).where(eq(otpChallenges.phone, challengeKey));
     return attachSession(respond({ user: publicSelf(admin) }), admin);
   }
 
@@ -1733,6 +1807,37 @@ async function handle(request: NextRequest, method: string, segments: string[]):
     ]);
     return respond({ items: await Promise.all(rows.map(async ({ lead, property }) => serializeCustomerLead(lead, property, await latestMeeting(lead.id)))), total, page, pages: Math.ceil(total / 12) });
   }
+  if (
+    segments[0] === "customer" &&
+    (segments[1] === "leads" || segments[1] === "inquiries") &&
+    segments.length === 3 &&
+    method === "GET"
+  ) {
+    const user = await requireRole(request, "customer");
+    const id = validId(segments[2]);
+    const [lead] = await db
+      .select({
+        ...customerLeadColumns,
+        customerId: leads.customerId,
+        propertyId: leads.propertyId,
+      })
+      .from(leads)
+      .where(eq(leads.id, id))
+      .limit(1);
+
+    if (!lead) {
+      fail(404, "Inquiry not found.");
+    }
+    // Strict IDOR protection: only the customer who created this lead can access it
+    if (lead.customerId !== user.id) {
+      fail(403, "You do not have access to this inquiry.");
+    }
+    const property = await getProperty(lead.propertyId);
+    if (!property) {
+      fail(404, "Listing not found.");
+    }
+    return respond({ lead: serializeCustomerLead(lead, property, await latestMeeting(lead.id)) });
+  }
   if ((route === "owner/leads" || route === "owner/inquiries") && method === "GET") {
     const user = await requireRole(request, "owner");
     const page = pageFrom(request);
@@ -1814,6 +1919,50 @@ async function handle(request: NextRequest, method: string, segments: string[]):
 
     const result = await handleOwnerResponse(id, input.response, "website");
     return respond({ success: true, message: `Response noted: ${input.response}`, result });
+  }
+  if (
+    (segments[0] === "leads" || segments[0] === "inquiries") &&
+    segments.length === 2 &&
+    method === "GET"
+  ) {
+    const user = await requireUser(request);
+    const id = validId(segments[1]);
+    const [lead] = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.id, id))
+      .limit(1);
+
+    if (!lead) {
+      fail(404, "Inquiry not found.");
+    }
+
+    const isCustomer = lead.customerId === user.id;
+    const isOwner = lead.ownerId === user.id;
+    const isAdmin = hasRole(user, "admin");
+
+    // Strict IDOR defense: caller must be the customer, the listing owner, or an administrator
+    if (!isCustomer && !isOwner && !isAdmin) {
+      fail(403, "You do not have access to this inquiry.");
+    }
+
+    const property = await getProperty(lead.propertyId);
+    if (!property) {
+      fail(404, "Listing not found.");
+    }
+    const meeting = await latestMeeting(lead.id);
+
+    if (isAdmin) {
+      const [fullProp] = await db.select().from(properties).where(eq(properties.id, lead.propertyId)).limit(1);
+      if (!fullProp) fail(404, "Listing not found.");
+      const [customer] = await db.select().from(users).where(eq(users.id, lead.customerId)).limit(1);
+      const [owner] = await db.select().from(users).where(eq(users.id, lead.ownerId)).limit(1);
+      return respond({ lead: await getAdminLead(lead, fullProp, customer, owner) });
+    }
+    if (isOwner) {
+      return respond({ inquiry: serializeOwnerInquiry(lead as any, meeting) });
+    }
+    return respond({ lead: serializeCustomerLead(lead, property, meeting) });
   }
   if (segments[0] === "leads" && segments.length === 3 && segments[2] === "meeting" && method === "GET") {
     const user = await requireUser(request);
@@ -2161,7 +2310,7 @@ async function handle(request: NextRequest, method: string, segments: string[]):
   }
 
   // Every endpoint below requires admin authorization before using AdminLeadSerializer.
-  if (route.startsWith("admin/")) {
+  if (route === "admin" || route.startsWith("admin/")) {
     const admin = await requireRole(request, "admin");
     if (route === "admin/leads" && method === "GET") {
       const page = pageFrom(request);

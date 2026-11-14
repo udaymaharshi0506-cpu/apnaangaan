@@ -7,13 +7,14 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { getJwtSecret } from "@/lib/jwt-secret";
 
 const ACCESS_COOKIE = "aangan_access";
 const REFRESH_COOKIE = "aangan_refresh";
 const ADMIN_CHALLENGE_COOKIE = "aangan_admin_challenge";
 const accessSeconds = 15 * 60;
 const refreshSeconds = 30 * 24 * 60 * 60;
-const secret = new TextEncoder().encode(process.env.AUTH_SECRET || createHash("sha256").update(process.env.DATABASE_URL || "local-preview-session").digest("hex"));
+const secret = getJwtSecret();
 
 function cookieValue(header: string | null, name: string) {
   const pair = header?.split("; ").find((item) => item.startsWith(`${name}=`));
@@ -24,15 +25,15 @@ function cookieOptions(maxAge: number) {
   return { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge };
 }
 
-async function signedToken(subject: string, type: string, expiration: string, jti?: string) {
-  let token = new SignJWT({ type }).setProtectedHeader({ alg: "HS256" }).setSubject(subject).setIssuedAt().setExpirationTime(expiration);
+async function signedToken(subject: string, type: string, expiration: string, jti?: string, extra?: Record<string, unknown>) {
+  let token = new SignJWT({ type, ...extra }).setProtectedHeader({ alg: "HS256" }).setSubject(subject).setIssuedAt().setExpirationTime(expiration);
   if (jti) token = token.setJti(jti);
   return token.sign(secret);
 }
 
-export async function createTestToken(userId: string) {
+export async function createTestToken(userId: string, role = "customer", roles = ["customer"]) {
   const id = randomUUID();
-  const token = await signedToken(userId, "access", "1h", id);
+  const token = await signedToken(userId, "access", "1h", id, { role, roles });
   await db.insert(refreshTokens).values({
     id,
     userId,
@@ -125,7 +126,11 @@ export function publicSelf(user: User) {
 
 export async function attachSession(response: NextResponse, user: User) {
   const id = randomUUID();
-  const access = await signedToken(user.id, "access", "15m", id);
+  const access = await signedToken(user.id, "access", "15m", id, {
+    role: user.role,
+    roles: user.roles,
+    email: user.email,
+  });
   const refresh = await signedToken(user.id, "refresh", "30d", id);
   await db.insert(refreshTokens).values({ id, userId: user.id, tokenHash: createHash("sha256").update(refresh).digest("hex"), expiresAt: new Date(Date.now() + refreshSeconds * 1000) });
   response.cookies.set(ACCESS_COOKIE, access, cookieOptions(accessSeconds));

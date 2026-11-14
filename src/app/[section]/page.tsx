@@ -25,6 +25,7 @@ const NotificationsExperience = dynamicImport(() => import("@/components/member-
 const PrivacyContent = dynamicImport(() => import("@/components/privacy-content").then((m) => m.PrivacyContent), { loading: ExperienceFallback });
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 type Props = { params: Promise<{ section: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 const titles: Record<string, string> = { search: "Explore rental homes", saved: "Saved rental homes", inquiries: "My inquiries", owner: "Owner dashboard", profile: "Profile & settings", notifications: "Notifications", login: "Log in", signup: "Create your account", setup: "Finish your profile", welcome: "The Apnaangaan way", "post-property": "List your property", privacy: "Privacy policy" };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
