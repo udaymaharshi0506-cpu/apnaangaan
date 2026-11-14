@@ -277,6 +277,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const isPropertyDetail = pathname.startsWith("/property/");
   const isPostProperty = pathname.startsWith("/post-property");
   const isAuth = ["/login", "/signup", "/setup", "/welcome"].includes(pathname);
+  const isFormOrAccountPage = isPostProperty || isAuth || pathname.startsWith("/profile");
 
   // Sticky header scroll listener & Back to top
   useEffect(() => {
@@ -335,22 +336,11 @@ export function SiteShell({ children }: { children: ReactNode }) {
     { label: "Rent a Home", href: "/search" },
   ] : navLinks;
 
-  const mobileTabs = isUserAdmin ? [
-    { label: "Workspace", href: "/admin", Icon: ShieldCheck },
-    { label: "Search", href: "/search", Icon: Search },
-    { label: "Updates", href: "/notifications", Icon: Bell },
-    { label: "Profile", href: "/profile", Icon: UserRound },
-  ] : isUserOwner ? [
-    { label: "Dashboard", href: "/owner", Icon: Home },
+  const mobileTabs = [
+    { label: "Home", href: "/", Icon: Home },
     { label: "Post", href: "/post-property", Icon: Plus },
     { label: "Search", href: "/search", Icon: Search },
     { label: "Updates", href: "/notifications", Icon: Bell },
-    { label: "Profile", href: "/profile", Icon: UserRound },
-  ] : [
-    { label: "Home", href: "/", Icon: Home },
-    { label: "Search", href: "/search", Icon: Search },
-    { label: "Saved", href: "/saved", Icon: Heart },
-    { label: "Inquiries", href: "/inquiries", Icon: ClipboardList },
     { label: "Profile", href: "/profile", Icon: UserRound },
   ];
 
@@ -396,28 +386,44 @@ export function SiteShell({ children }: { children: ReactNode }) {
               </button>
 
               {notificationsOpen && (
-                <div className="notifications-popover" role="dialog" aria-label="Notifications preview">
-                  <div className="notifications-popover-header">
-                    <div className="popover-title-row">
-                      <h4>Notifications</h4>
-                      {unreadCount > 0 ? (
-                        <span className="popover-unread-pill">{unreadCount} new</span>
-                      ) : (
-                        <span className="popover-all-read-pill">All caught up</span>
-                      )}
+                <>
+                  <div
+                    className="notifications-backdrop"
+                    onClick={() => setNotificationsOpen(false)}
+                    aria-hidden="true"
+                  />
+                  <div className="notifications-popover" role="dialog" aria-label="Notifications preview">
+                    <div className="notifications-popover-header">
+                      <div className="popover-title-row">
+                        <h4>Notifications</h4>
+                        {unreadCount > 0 ? (
+                          <span className="popover-unread-pill">{unreadCount} new</span>
+                        ) : (
+                          <span className="popover-all-read-pill">All caught up</span>
+                        )}
+                      </div>
+                      <div className="popover-header-actions">
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            className="mark-all-btn"
+                            onClick={() => void markAllNotificationsRead()}
+                            title="Mark all as read"
+                          >
+                            <Check size={13} strokeWidth={2.4} />
+                            <span>Mark read</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="popover-close-btn"
+                          onClick={() => setNotificationsOpen(false)}
+                          aria-label="Close notifications panel"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
                     </div>
-                    {unreadCount > 0 && (
-                      <button
-                        type="button"
-                        className="mark-all-btn"
-                        onClick={() => void markAllNotificationsRead()}
-                        title="Mark all as read"
-                      >
-                        <Check size={13} strokeWidth={2.4} />
-                        <span>Mark read</span>
-                      </button>
-                    )}
-                  </div>
 
                   <div className="notifications-popover-body">
                     {recentNotifications.length === 0 ? (
@@ -466,7 +472,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
                     </Link>
                   </div>
                 </div>
-              )}
+              </>
+            )}
             </div>
           )}
           <Link href={user ? "/profile" : "/login"} className="header-signin"><UserRound size={18} strokeWidth={1.8}/><span>{user ? user.name?.split(" ")[0] || "Profile" : "Log in"}</span></Link>
@@ -484,7 +491,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
       </div>
     </header>
     <div className="site-content page-transition-wrap" key={pathname}>{children}</div>
-    {!isPostProperty && (
+    {!isFormOrAccountPage && (
       <button
         type="button"
         className={`back-to-top ${showBackToTop ? "visible" : ""}`}
@@ -504,14 +511,24 @@ export function SiteShell({ children }: { children: ReactNode }) {
     {!isPropertyDetail && !isAuth && (
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
         {mobileTabs.map(({ label, href, Icon }) => {
+          const isActive = href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
           const hasBadge = href === "/notifications" && unreadCount > 0;
           return (
-            <Link key={label} href={href} className={`tab-item ${pathname === href ? "active" : ""}`}>
-              <span className="tab-icon-wrap" style={{ position: "relative", display: "inline-flex" }}>
-                <Icon size={21} strokeWidth={pathname === href ? 2.3 : 1.8}/>
-                {hasBadge && <span className="tab-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+            <Link
+              key={label}
+              href={href}
+              className={`tab-item ${isActive ? "active" : ""}`}
+              aria-label={label}
+            >
+              <span className="tab-icon-wrap">
+                <Icon size={20} strokeWidth={1.75} />
+                {hasBadge && (
+                  <span className="tab-badge" aria-label={`${unreadCount} unread updates`}>
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
               </span>
-              <span>{label}</span>
+              <span className="tab-label">{label}</span>
             </Link>
           );
         })}

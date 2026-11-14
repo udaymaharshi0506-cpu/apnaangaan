@@ -1290,25 +1290,25 @@ export function PostPropertyExperience() {
                 <h2>Owner identity &amp; verification</h2>
                 <p>Provide your contact details and mandatory KYC documents to verify ownership.</p>
 
-                <div className="form-two-cols">
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="owner-name">
                       FULL NAME <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="owner-name"
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.ownerName}
                       onChange={(e) => update({ ownerName: e.target.value })}
                       placeholder="e.g. Uday Maharshi"
                       required
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="owner-phone">
                       MOBILE NUMBER (10 DIGITS) <span style={{ color: "#dc2626" }}>*</span>
                     </label>
-                    <div className="phone-field">
+                    <div className="phone-field w-full">
                       <span>+91</span>
                       <input
                         id="owner-phone"
@@ -1517,14 +1517,14 @@ export function PostPropertyExperience() {
                   required
                 />
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="post-pincode">
                       PIN CODE (6 DIGITS) <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="post-pincode"
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.pinCode.replace(/\D/g, "").slice(0, 6)}
                       maxLength={6}
                       inputMode="numeric"
@@ -1533,13 +1533,13 @@ export function PostPropertyExperience() {
                       required
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="post-locality">
                       LOCALITY / AREA <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="post-locality"
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.locality}
                       onChange={(e) => update({ locality: e.target.value })}
                       placeholder="e.g. Koramangala 4th Block"
@@ -1630,14 +1630,14 @@ export function PostPropertyExperience() {
                   ))}
                 </div>
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="area-sqft">
                       SUPER BUILT-UP AREA (SQ FT) <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="area-sqft"
-                      className="form-input"
+                      className="form-input w-full"
                       type="number"
                       step="1"
                       min={LISTING_LIMITS.rent_home.minAreaSqft}
@@ -1648,13 +1648,13 @@ export function PostPropertyExperience() {
                       required
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="furnishing-status">
                       FURNISHING STATUS <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <select
                       id="furnishing-status"
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.furnishingStatus}
                       onChange={(e) => update({ furnishingStatus: e.target.value })}
                     >
@@ -1665,26 +1665,26 @@ export function PostPropertyExperience() {
                   </div>
                 </div>
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="property-floor">
                       UNIT FLOOR
                     </label>
                     <input
                       id="property-floor"
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.floor}
                       onChange={(e) => update({ floor: e.target.value })}
                       placeholder="e.g. 3rd Floor, Ground"
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="total-floors">
                       TOTAL FLOORS IN BUILDING
                     </label>
                     <input
                       id="total-floors"
-                      className="form-input"
+                      className="form-input w-full"
                       type="number"
                       min="1"
                       value={form.totalFloors}
@@ -1694,11 +1694,11 @@ export function PostPropertyExperience() {
                   </div>
                 </div>
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label">PROPERTY AGE</label>
                     <select
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.propertyAge}
                       onChange={(e) => update({ propertyAge: e.target.value })}
                     >
@@ -1707,10 +1707,10 @@ export function PostPropertyExperience() {
                       ))}
                     </select>
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label">FACING DIRECTION</label>
                     <select
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.facing}
                       onChange={(e) => update({ facing: e.target.value })}
                     >
@@ -1754,14 +1754,14 @@ export function PostPropertyExperience() {
                 <p>Be transparent about pricing, maintenance, and possession terms.</p>
 
                 {/* Rental Financials & Terms */}
-                <div className="form-two-cols">
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="rent-price">
                       MONTHLY RENT (₹) <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="rent-price"
-                      className="form-input"
+                      className="form-input w-full"
                       type="number"
                       step="1"
                       min={LISTING_LIMITS.rent_home.minPrice}
@@ -1772,13 +1772,13 @@ export function PostPropertyExperience() {
                       required
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" htmlFor="rent-deposit">
                       SECURITY DEPOSIT (₹) <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       id="rent-deposit"
-                      className="form-input"
+                      className="form-input w-full"
                       type="number"
                       step="1"
                       min="0"
@@ -1791,20 +1791,20 @@ export function PostPropertyExperience() {
                   </div>
                 </div>
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label">AVAILABLE FROM</label>
                     <input
-                      className="form-input"
+                      className="form-input w-full"
                       type="date"
                       value={form.availableFrom}
                       onChange={(e) => update({ availableFrom: e.target.value })}
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label">TENANT PREFERENCE</label>
                     <select
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.tenantPreference}
                       onChange={(e) => update({ tenantPreference: e.target.value })}
                     >
@@ -1815,11 +1815,11 @@ export function PostPropertyExperience() {
                   </div>
                 </div>
 
-                <div className="form-two-cols" style={{ marginTop: "14px" }}>
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginTop: "14px" }}>
+                  <div className="w-full min-w-0">
                     <label className="form-label">LOCK-IN PERIOD</label>
                     <select
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.lockInPeriod}
                       onChange={(e) => update({ lockInPeriod: e.target.value })}
                     >
@@ -1828,10 +1828,10 @@ export function PostPropertyExperience() {
                       ))}
                     </select>
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label">NOTICE PERIOD</label>
                     <select
-                      className="form-input"
+                      className="form-input w-full"
                       value={form.noticePeriod}
                       onChange={(e) => update({ noticePeriod: e.target.value })}
                     >
@@ -2108,7 +2108,7 @@ export function PostPropertyExperience() {
             )}
 
             {/* Footer Navigation */}
-            <div className="post-form-footer" style={{ flexWrap: "wrap", gap: "10px" }}>
+            <div className="post-form-footer">
               {step > 0 ? (
                 <button
                   type="button"
@@ -2124,7 +2124,7 @@ export function PostPropertyExperience() {
                 <span />
               )}
 
-              <div className="post-footer-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <div className="post-footer-actions">
                 {(!editId || editingStatus === "draft") && (
                   <button
                     type="button"
@@ -2208,26 +2208,26 @@ export function PostPropertyExperience() {
                   />
                 </div>
 
-                <div className="form-two-cols">
-                  <div>
+                <div className="form-two-cols grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="w-full min-w-0">
                     <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
                       City
                     </label>
                     <input
                       type="text"
-                      className="form-input"
+                      className="form-input w-full"
                       placeholder="e.g. Bengaluru"
                       value={managedForm.city}
                       onChange={(e) => setManagedForm({ ...managedForm, city: e.target.value })}
                     />
                   </div>
-                  <div>
+                  <div className="w-full min-w-0">
                     <label className="form-label" style={{ display: "block", marginBottom: "6px" }}>
                       Owner Contact Phone <span style={{ color: "#dc2626" }}>*</span>
                     </label>
                     <input
                       type="tel"
-                      className="form-input"
+                      className="form-input w-full"
                       placeholder="10-digit mobile"
                       value={managedForm.ownerContactPhone}
                       onChange={(e) => setManagedForm({ ...managedForm, ownerContactPhone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
